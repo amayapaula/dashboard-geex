@@ -1,0 +1,7 @@
+# Tema del dashboard Geex. Cambiá estos hex por los colores oficiales de la empresa.
+[theme]
+primaryColor = "#44B3E1"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#EBF3FA"
+textColor = "#0B192C"
+font = "sans serif"
