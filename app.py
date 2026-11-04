@@ -20,7 +20,6 @@ PERIODOS_FACTURACION = {
     (2026, 10): {"META": ("2026-10-02", "2026-10-28"), "GOOGLE": ("2026-10-01", "2026-10-31")},
     (2026, 11): {"META": ("2026-10-29", "2026-11-26"), "GOOGLE": ("2026-11-01", "2026-11-26")},
 }
-
 SIN_ID_SUMA_A_PLATAFORMA = "META"
 SIN_ID_SUMA_A_PRODUCTO = None
 
@@ -283,12 +282,11 @@ def calcular_metricas_v6(anio, mes):
 
 
 # ==========================================================
-# 4. PESTAÑAS (incluyendo el Resumen Histórico estático desde marzo)
+# 4. PESTAÑAS (Resumen Histórico estático + Funciones Originales)
 # ==========================================================
 def render_historico():
     st.markdown("<div class='section-header'>Resumen Histórico de la Operación (Desde Marzo 2026)</div>", unsafe_allow_html=True)
     st.info("Vista general y comparativa del rendimiento histórico acumulado mes a mes desde marzo.")
-    
     filas_historicas = [
         {"Mes": "Marzo 2026", "Ventas Totales": 1250, "Porta": 700, "LN": 300, "BAF": 250, "Leads": 9500, "Horas": 3800, "SPH Total": "0.33", "Efectividad": "13.16%"},
         {"Mes": "Abril 2026", "Ventas Totales": 1380, "Porta": 780, "LN": 320, "BAF": 280, "Leads": 10200, "Horas": 3950, "SPH Total": "0.35", "Efectividad": "13.53%"},
@@ -300,8 +298,7 @@ def render_historico():
         {"Mes": "Octubre 2026", "Ventas Totales": 1750, "Porta": 1020, "LN": 380, "BAF": 350, "Leads": 13500, "Horas": 4400, "SPH Total": "0.40", "Efectividad": "12.96%"},
         {"Mes": "Noviembre 2026", "Ventas Totales": 1680, "Porta": 980, "LN": 370, "BAF": 330, "Leads": 13000, "Horas": 4300, "SPH Total": "0.39", "Efectividad": "12.92%"}
     ]
-    df_hist = pd.DataFrame(filas_historicas)
-    st.dataframe(df_hist, use_container_width=True, hide_index=True, height=400)
+    st.dataframe(pd.DataFrame(filas_historicas), use_container_width=True, hide_index=True, height=400)
 
 
 def render_productividad(m):
@@ -414,6 +411,14 @@ def render_datos(m):
     c3.metric("Total Landing (Turno)", f"{int(df_hf['Landing'].sum()):,}")
     st.dataframe(df_hf, use_container_width=True, hide_index=True, height=350)
 
+    s1, s2, s3 = st.tabs(["Porta Planes", "Porta eSIM", "Planes BAF"])
+    with s1: 
+        if not m["p_planes_pivot"].empty: st.dataframe(m["p_planes_pivot"], use_container_width=True)
+    with s2: 
+        if not m["esim_pivot"].empty: st.dataframe(m["esim_pivot"], use_container_width=True)
+    with s3: 
+        if not m["baf_pivot"].empty: st.dataframe(m["baf_pivot"], use_container_width=True)
+
 
 FORMATO_EF = {"Leads": "{:,.0f}", "Efectividad": "{:.2%}", "Porta": "{:,.0f}", "% Porta": "{:.2%}", "LN": "{:,.0f}", "% LN": "{:.2%}",
               "BAF": "{:,.0f}", "% BAF": "{:.2%}", "Total Ventas": "{:,.0f}"}
@@ -474,15 +479,20 @@ def calcular_presupuesto(anio, mes):
     dias = pd.date_range(min(v[0] for v in per.values()), max(v[1] for v in per.values()))
 
     def gasto_de(df, plat, col):
+        if df.empty or col not in df.columns:
+            return pd.DataFrame(columns=["Fecha", "Plataforma", "Producto", "Gasto"])
         ini, fin = per[plat]
         d = df[(df["Pais"] == "AR") & (df["Fecha"] >= ini) & (df["Fecha"] <= fin)]
         return pd.DataFrame({"Fecha": d["Fecha"].dt.normalize(), "Plataforma": plat,
                              "Producto": d["Producto"].astype(str).str.upper().str.strip(), "Gasto": pd.to_numeric(d[col], errors="coerce").fillna(0)})
     gasto = pd.concat([gasto_de(D["meta"], "META", "Monto gastado (ARS)"), gasto_de(D["google"], "GOOGLE", "Costo num")], ignore_index=True)
-    g_pl = gasto.pivot_table(index="Fecha", columns="Plataforma", values="Gasto", aggfunc="sum").reindex(dias).fillna(0)
+    if not gasto.empty:
+        g_pl = gasto.pivot_table(index="Fecha", columns="Plataforma", values="Gasto", aggfunc="sum").reindex(dias).fillna(0)
+    else:
+        g_pl = pd.DataFrame(index=dias)
     
     M = pd.DataFrame(index=dias)
-    M["Total ($)"] = g_pl.sum(axis=1) if not g_pl.empty else 0
+    M["Total ($)"] = g_pl.sum(axis=1) if not g_pl.empty and len(g_pl.columns) > 0 else 0
     return {"M": M, "periodos": per}
 
 
@@ -493,7 +503,7 @@ def render_presupuesto(m):
 
 
 # ==========================================================
-# 5. ARMADO DE LA PÁGINA (Pestañas originales)
+# 5. ARMADO DE LA PÁGINA
 # ==========================================================
 try:
     m = calcular_metricas_v6(anio_sel, mes_sel)
