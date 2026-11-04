@@ -555,3 +555,44 @@ with tab_asesores: render_asesores(m)
 with tab_datos: render_datos(m)
 with tab_efectividad: render_efectividad(m)
 with tab_presupuesto: render_presupuesto(m)
+
+import os
+import streamlit as st
+from google import genai
+import pandas as pd # Asegúrate de que pandas esté importado
+
+st.subheader("Chat Asistente Geex")
+
+# Tomar la clave directamente desde Easypanel
+api_key = os.environ.get("GEMINI_API_KEY")
+client = genai.Client(api_key=api_key)
+
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+if prompt := st.chat_input("Consulta métricas sobre las ventas o agentes..."):
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    # Leer el Excel para darle contexto a Gemini
+    try:
+        df = pd.read_excel('DASHHHHH.xlsx')
+        contexto = df.to_string(index=False)
+    except Exception as e:
+        contexto = "No se pudo cargar el Excel."
+
+    prompt_con_contexto = f"Basado en los siguientes datos del dashboard de Geex:\n\n{contexto}\n\nResponde a esta pregunta: {prompt}"
+
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=prompt_con_contexto,
+    )
+
+    with st.chat_message("assistant"):
+        st.markdown(response.text)
+    st.session_state.messages.append({"role": "assistant", "content": response.text})
