@@ -766,10 +766,10 @@ with tab_efectividad: render_efectividad(m)
 with tab_presupuesto: render_presupuesto(m)
 
 # ==========================================================
-# 6. ASISTENTE DE INTELIGENCIA ARTIFICIAL GEEX
+# 6. ASISTENTE DE INTELIGENCIA ARTIFICIAL GEEX (HISTÓRICO)
 # ==========================================================
 st.markdown("---")
-st.markdown("### 🤖 Asistente de Inteligencia Artificial Geex")
+st.markdown("### Paula Asistenta")
 
 api_key = os.environ.get("GEMINI_API_KEY")
 client = genai.Client(api_key=api_key) if api_key else None
@@ -781,33 +781,33 @@ for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-if prompt := st.chat_input("Consulta métricas sobre ventas, asesores o presupuesto..."):
+if prompt := st.chat_input("Consulta métricas, histórico entre meses o asesores..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
     if client:
         try:
-            # Extraemos los costos dinámicamente para que la IA los pueda leer
-            P_ia = calcular_presupuesto(anio_sel, mes_sel)
-            T_ia = P_ia["M"].sum()
-            gasto_meta = T_ia.get("Meta ($)", 0)
-            gasto_google = T_ia.get("Google ($)", 0)
-            gasto_total = T_ia.get("Total ($)", 0)
-            
-            contexto_resumen = (
-                f"Métricas del mes ({mes_seleccionado}):\n"
-                f"- Ventas Totales: {m['v_totales']}\n"
-                f"- Porta: {m['v_porta']} | LN: {m['v_ln']} | BAF: {m['v_baf']}\n"
-                f"- Leads Totales: {m['leads_tot']}\n"
-                f"- Horas Totales: {m['h_totales']}\n"
-                f"- SPH Total: {m['sph_total']:.2f}\n"
-                f"- Gasto Total ARS: ${gasto_total:,.2f} (Meta: ${gasto_meta:,.2f}, Google: ${gasto_google:,.2f})\n\n"
-                f"Tabla Asesores:\n{m['df_asesores'].to_csv(index=False)}"
+            # Construimos un resumen histórico de TODOS los meses disponibles
+            resumen_historico = "Resumen histórico de todos los meses disponibles:\n"
+            for nombre_mes_iter, (aa_iter, mm_iter) in meses_disponibles.items():
+                m_hist = calcular_metricas_v6(aa_iter, mm_iter)
+                resumen_historico += (
+                    f"--- {nombre_mes_iter} ---\n"
+                    f"Ventas Totales: {m_hist['v_totales']} (Porta: {m_hist['v_porta']}, LN: {m_hist['v_ln']}, BAF: {m_hist['v_baf']})\n"
+                    f"Leads Totales: {m_hist['leads_tot']} | Horas: {m_hist['h_totales']:,.0f} | SPH Total: {m_hist['sph_total']:.2f}\n"
+                )
+                # Agregamos un pantallazo de los planes de portabilidad si existen
+                if not m_hist['p_planes_pivot'].empty:
+                    resumen_historico += f"Planes Porta:\n{m_hist['p_planes_pivot'].to_string()}\n\n"
+
+            prompt_completo = (
+                f"Eres el asistente analítico de Geex para Claro Argentina y Uruguay.\n"
+                f"Tienes acceso a todo el histórico de datos:\n\n{resumen_historico}\n\n"
+                f"Pregunta del usuario: {prompt}\n\n"
+                f"Responde de forma precisa, profesional y directa basándote en los datos anteriores."
             )
-            
-            prompt_completo = f"Basado estrictamente en los siguientes datos del dashboard de Geex:\n\n{contexto_resumen}\n\nResponde a esta pregunta de forma profesional y directa: {prompt}"
-            
+
             response = client.models.generate_content(
                 model="gemini-2.5-flash",
                 contents=prompt_completo,
@@ -817,7 +817,7 @@ if prompt := st.chat_input("Consulta métricas sobre ventas, asesores o presupue
             respuesta = f"Error al procesar la IA: {e}"
     else:
         respuesta = "Falta configurar GEMINI_API_KEY en la sección Entorno de Easypanel."
-        
+
     with st.chat_message("assistant"):
         st.markdown(respuesta)
     st.session_state.messages.append({"role": "assistant", "content": respuesta})
