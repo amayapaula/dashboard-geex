@@ -236,9 +236,9 @@ def calcular_metricas_v6(anio, mes):
     df_leads_h = df_leads_h.sort_values("Hora").reset_index(drop=True)
 
     # --- LEADS CON ANUNCIO
-    bot_m["join_num"] = bot_m["Id Contacto/Número"].astype(str).str.replace(r"\.0\$", "", regex=True).str[-10:]
+    bot_m["join_num"] = bot_m["Id Contacto/Número"].astype(str).str.replace(r"\.0$", "", regex=True).str[-10:]
     bot_an = D["bot_an"].copy()
-    bot_an["join_num"] = bot_an["NIM"].astype(str).str.replace(r"\.0\$", "", regex=True).str[-10:]
+    bot_an["join_num"] = bot_an["NIM"].astype(str).str.replace(r"\.0$", "", regex=True).str[-10:]
     bot_an["Anuncio_Titulo"] = limpio(bot_an["Anuncio_Titulo"])
     bot_an_u = bot_an.dropna(subset=["Anuncio_Titulo"])[["join_num", "Anuncio_Titulo", "Producto"]].drop_duplicates("join_num", keep="last")
     bot_m_merged = pd.merge(bot_m, bot_an_u, on="join_num", how="left")
@@ -289,7 +289,6 @@ def render_historico():
     st.markdown("<div class='section-header'>Resumen Histórico de la Operación (Desde Marzo 2026)</div>", unsafe_allow_html=True)
     st.info("Vista general y comparativa del rendimiento histórico acumulado mes a mes desde marzo.")
     
-    # Datos estáticos / calculados del histórico desde marzo hasta noviembre
     filas_historicas = [
         {"Mes": "Marzo 2026", "Ventas Totales": 1250, "Porta": 700, "LN": 300, "BAF": 250, "Leads": 9500, "Horas": 3800, "SPH Total": "0.33", "Efectividad": "13.16%"},
         {"Mes": "Abril 2026", "Ventas Totales": 1380, "Porta": 780, "LN": 320, "BAF": 280, "Leads": 10200, "Horas": 3950, "SPH Total": "0.35", "Efectividad": "13.53%"},
@@ -483,7 +482,7 @@ def calcular_presupuesto(anio, mes):
     g_pl = gasto.pivot_table(index="Fecha", columns="Plataforma", values="Gasto", aggfunc="sum").reindex(dias).fillna(0)
     
     M = pd.DataFrame(index=dias)
-    M["Total (\$)"] = g_pl.sum(axis=1) if not g_pl.empty else 0
+    M["Total ($)"] = g_pl.sum(axis=1) if not g_pl.empty else 0
     return {"M": M, "periodos": per}
 
 
@@ -510,4 +509,5 @@ with tab_hist: render_historico()
 with tab_prod: render_productividad(m)
 with tab_asesores: render_asesores(m)
 with tab_datos: render_datos(m)
-with tab_efect
+with tab_efectividad: render_efectividad(m)
+with tab_presupuesto: render_presupuesto(m)
