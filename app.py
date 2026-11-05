@@ -415,20 +415,46 @@ tab_historico, tab_prod, tab_asesores, tab_datos, tab_efectividad, tab_presupues
 
 # --- 1. PESTAÑA HISTÓRICO (La nueva tabla estática desde Marzo) ---
 with tab_historico:
-    st.markdown("<div class='section-header'>Resumen Histórico de la Operación (Desde Marzo 2026)</div>", unsafe_allow_html=True)
-    st.info("Vista general y comparativa del rendimiento histórico acumulado mes a mes desde marzo.")
-    filas_historicas = [
-        {"Mes": "Marzo 2026", "Ventas Totales": 1250, "Porta": 700, "LN": 300, "BAF": 250, "Leads": 9500, "Horas": 3800, "SPH Total": "0.33", "Efectividad": "13.16%"},
-        {"Mes": "Abril 2026", "Ventas Totales": 1380, "Porta": 780, "LN": 320, "BAF": 280, "Leads": 10200, "Horas": 3950, "SPH Total": "0.35", "Efectividad": "13.53%"},
-        {"Mes": "Mayo 2026", "Ventas Totales": 1420, "Porta": 810, "LN": 310, "BAF": 300, "Leads": 10800, "Horas": 4000, "SPH Total": "0.36", "Efectividad": "13.15%"},
-        {"Mes": "Junio 2026", "Ventas Totales": 1350, "Porta": 760, "LN": 290, "BAF": 300, "Leads": 10100, "Horas": 3900, "SPH Total": "0.35", "Efectividad": "13.37%"},
-        {"Mes": "Julio 2026", "Ventas Totales": 1490, "Porta": 850, "LN": 340, "BAF": 300, "Leads": 11200, "Horas": 4100, "SPH Total": "0.36", "Efectividad": "13.30%"},
-        {"Mes": "Agosto 2026", "Ventas Totales": 1560, "Porta": 900, "LN": 350, "BAF": 310, "Leads": 11800, "Horas": 4200, "SPH Total": "0.37", "Efectividad": "13.22%"},
-        {"Mes": "Septiembre 2026", "Ventas Totales": 1620, "Porta": 940, "LN": 360, "BAF": 320, "Leads": 12300, "Horas": 4250, "SPH Total": "0.38", "Efectividad": "13.17%"},
-        {"Mes": "Octubre 2026", "Ventas Totales": 1750, "Porta": 1020, "LN": 380, "BAF": 350, "Leads": 13500, "Horas": 4400, "SPH Total": "0.40", "Efectividad": "12.96%"},
-        {"Mes": "Noviembre 2026", "Ventas Totales": 1680, "Porta": 980, "LN": 370, "BAF": 330, "Leads": 13000, "Horas": 4300, "SPH Total": "0.39", "Efectividad": "12.92%"}
+    st.markdown("<div class='section-header'>Resumen Histórico Operativo (CC 6 a CC 11)</div>", unsafe_allow_html=True)
+    st.info("Vista consolidada por mes con métricas de ventas, SPH general, inversión y CPL.")
+
+    # 1. TABLA GENERAL CONSOLIDADA
+    datos_generales = [
+        {"CC": 6, "Mes": "Junio", "Porta": 518, "LN": 350, "BAF": 560, "Ventas Totales": 1428, "Horas Total": 3150, "SPH Total": "0.45", "SPH BAF+Porta": "0.34", "Leads Totales": "16,834", "Efectividad": "8%", "Presupuesto Ciclo": "$33.831.810,37", "CPL Mensual": "$2.009,73", "CPL Ciclo": "$1.638,50"},
+        {"CC": 7, "Mes": "Julio", "Porta": 399, "LN": 395, "BAF": 540, "Ventas Totales": 1334, "Horas Total": 3156, "SPH Total": "0.42", "SPH BAF+Porta": "0.30", "Leads Totales": "18,110", "Efectividad": "7%", "Presupuesto Ciclo": "$34.736.333,59", "CPL Mensual": "$1.918,07", "CPL Ciclo": "$2.092,93"},
+        {"CC": 8, "Mes": "Agosto", "Porta": 542, "LN": 365, "BAF": 494, "Ventas Totales": 1401, "Horas Total": 3030, "SPH Total": "0.46", "SPH BAF+Porta": "0.34", "Leads Totales": "15,567", "Efectividad": "9%", "Presupuesto Ciclo": "$37.593.975,01", "CPL Mensual": "$2.414,98", "CPL Ciclo": "$2.673,25"},
+        {"CC": 9, "Mes": "Septiembre", "Porta": 511, "LN": 248, "BAF": 444, "Ventas Totales": 1203, "Horas Total": 3282, "SPH Total": "0.37", "SPH BAF+Porta": "0.29", "Leads Totales": "10,866", "Efectividad": "11%", "Presupuesto Ciclo": "$37.823.181,54", "CPL Mensual": "$3.480,87", "CPL Ciclo": "$2.963,73"},
+        {"CC": 10, "Mes": "Octubre", "Porta": 366, "LN": 230, "BAF": 469, "Ventas Totales": 1065, "Horas Total": 2208, "SPH Total": "0.48", "SPH BAF+Porta": "0.38", "Leads Totales": "12,412", "Efectividad": "9%", "Presupuesto Ciclo": "$29.823.696,35", "CPL Mensual": "$2.402,81", "CPL Ciclo": "$2.606,97"},
+        {"CC": 11, "Mes": "Noviembre", "Porta": 29, "LN": 20, "BAF": 37, "Ventas Totales": 86, "Horas Total": 216, "SPH Total": "0.40", "SPH BAF+Porta": "0.31", "Leads Totales": "1,382", "Efectividad": "6%", "Presupuesto Ciclo": "$457.590,32", "CPL Mensual": "$331,11", "CPL Ciclo": "$227,09"}
     ]
-    st.dataframe(pd.DataFrame(filas_historicas), use_container_width=True, hide_index=True, height=400)
+    st.dataframe(pd.DataFrame(datos_generales), use_container_width=True, hide_index=True)
+
+    st.markdown("<div class='section-header'>Desglose Histórico por Turnos (Mañana vs Tarde)</div>", unsafe_allow_html=True)
+    
+    # 2. DESGLOSE POR TURNOS
+    sub_m, sub_t = st.tabs(["Turno Mañana (Yamil)", "Turno Tarde (Soledad)"])
+    
+    with sub_m:
+        datos_manana = [
+            {"CC": 6, "Mes": "Junio", "Horas Mañana": 1728, "Porta": 295, "LN": 180, "BAF": 274, "Total Yamil": 749, "SPH Mañana": "0.43", "SPH BAF+Porta": "0.33"},
+            {"CC": 7, "Mes": "Julio", "Horas Mañana": 1728, "Porta": 203, "LN": 206, "BAF": 265, "Total Yamil": 674, "SPH Mañana": "0.39", "SPH BAF+Porta": "0.27"},
+            {"CC": 8, "Mes": "Agosto", "Horas Mañana": 1962, "Porta": 375, "LN": 213, "BAF": 336, "Total Yamil": 924, "SPH Mañana": "0.47", "SPH BAF+Porta": "0.36"},
+            {"CC": 9, "Mes": "Septiembre", "Horas Mañana": 2184, "Porta": 329, "LN": 130, "BAF": 333, "Total Yamil": 792, "SPH Mañana": "0.36", "SPH BAF+Porta": "0.30"},
+            {"CC": 10, "Mes": "Octubre", "Horas Mañana": 1506, "Porta": 253, "LN": 130, "BAF": 336, "Total Yamil": 719, "SPH Mañana": "0.48", "SPH BAF+Porta": "0.39"},
+            {"CC": 11, "Mes": "Noviembre", "Horas Mañana": 144, "Porta": 17, "LN": 11, "BAF": 20, "Total Yamil": 48, "SPH Mañana": "0.33", "SPH BAF+Porta": "0.26"}
+        ]
+        st.dataframe(pd.DataFrame(datos_manana), use_container_width=True, hide_index=True)
+
+    with sub_t:
+        datos_tarde = [
+            {"CC": 6, "Mes": "Junio", "Horas Tarde": 1422, "Porta": 223, "LN": 170, "BAF": 286, "Total Tarde": 679, "SPH Tarde": "0.48", "SPH BAF+Porta": "0.36"},
+            {"CC": 7, "Mes": "Julio", "Horas Tarde": 1428, "Porta": 196, "LN": 189, "BAF": 275, "Total Tarde": 660, "SPH Tarde": "0.46", "SPH BAF+Porta": "0.33"},
+            {"CC": 8, "Mes": "Agosto", "Horas Tarde": 1068, "Porta": 167, "LN": 152, "BAF": 158, "Total Tarde": 477, "SPH Tarde": "0.45", "SPH BAF+Porta": "0.30"},
+            {"CC": 9, "Mes": "Septiembre", "Horas Tarde": 1098, "Porta": 182, "LN": 118, "BAF": 111, "Total Tarde": 411, "SPH Tarde": "0.37", "SPH BAF+Porta": "0.27"},
+            {"CC": 10, "Mes": "Octubre", "Horas Tarde": 702, "Porta": 113, "LN": 100, "BAF": 133, "Total Tarde": 346, "SPH Tarde": "0.49", "SPH BAF+Porta": "0.35"},
+            {"CC": 11, "Mes": "Noviembre", "Horas Tarde": 72, "Porta": 12, "LN": 9, "BAF": 17, "Total Tarde": 38, "SPH Tarde": "0.53", "SPH BAF+Porta": "0.40"}
+        ]
+        st.dataframe(pd.DataFrame(datos_tarde), use_container_width=True, hide_index=True)
 
 # --- 2. PESTAÑA PRODUCTIVIDAD (Exactamente tu código) ---
 with tab_prod:
