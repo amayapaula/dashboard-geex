@@ -296,7 +296,6 @@ def calculate_geex_metrics_final(anio, mes):
     # ==========================================
     # --- PRESUPUESTO DIARIO, REALES Y CPL ---
     # ==========================================
-    # Filtro flexible para Meta Argentina
     m_ar = meta_raw.copy()
     m_ar['Pais_Clean'] = m_ar['Pais'].astype(str).str.strip().str.upper()
     m_ar = m_ar[m_ar['Pais_Clean'].str.startswith('AR')].copy()
@@ -305,8 +304,8 @@ def calculate_geex_metrics_final(anio, mes):
     
     col_spend_meta = 'Monto gastado (ARS)' if 'Monto gastado (ARS)' in m_ar.columns else 'Monto gastado'
     m_ar['Gasto_Clean'] = safe_numeric_spend(m_ar[col_spend_meta])
+    m_ar['Leads_Plataforma'] = pd.to_numeric(m_ar['Resultados'], errors='coerce').fillna(0) if 'Resultados' in m_ar.columns else 0
 
-    # Filtro flexible para Google Argentina
     g_ar = google_raw.copy()
     g_ar['Pais_Clean'] = g_ar['Pais'].astype(str).str.strip().str.upper()
     g_ar = g_ar[g_ar['Pais_Clean'].str.startswith('AR')].copy()
@@ -315,23 +314,22 @@ def calculate_geex_metrics_final(anio, mes):
     
     col_spend_goog = 'Costo num' if 'Costo num' in g_ar.columns else ('Costo' if 'Costo' in g_ar.columns else 'Gasto')
     g_ar['Gasto_Clean'] = safe_numeric_spend(g_ar[col_spend_goog])
+    g_ar['Leads_Plataforma'] = pd.to_numeric(g_ar['Conversiones num'] if 'Conversiones num' in g_ar.columns else g_ar.get('Conversiones', 0), errors='coerce').fillna(0)
 
     b_all = bot_raw.copy()
     l_all = land_raw.copy()
-
     bot_an_copy = bot_an_raw.copy()
+    
     b_all['join_num'] = b_all['Id Contacto/Número'].astype(str).str.replace(r'\.0$', '', regex=True).str[-10:]
     bot_an_copy['join_num'] = bot_an_copy['NIM'].astype(str).str.replace(r'\.0$', '', regex=True).str[-10:]
-    
     bot_an_clean_pres = bot_an_copy.dropna(subset=['Anuncio_Titulo']).drop_duplicates(subset=['join_num'], keep='last')
     b_all = b_all.merge(bot_an_clean_pres[['join_num', 'Plataforma', 'Producto']], on='join_num', how='left')
 
     l_all['Plataforma'] = l_all['Plataforma'].astype(str).str.strip().str.upper()
     l_all['Producto'] = l_all['Producto'].astype(str).str.strip().str.upper()
     b_all['Plataforma'] = b_all['Plataforma'].astype(str).str.strip().str.upper()
-    b_all['Producto'] = b_all['Producto'].astype(str).str.strip().str.upper()
+    b_all['Producto_Ad'] = b_all['Producto'].astype(str).str.strip().str.upper()
 
-    # Rango de facturación según mes
     if mes == 10:
         start_d = pd.Timestamp('2026-10-01')
         end_d = pd.Timestamp('2026-10-31')
@@ -352,18 +350,21 @@ def calculate_geex_metrics_final(anio, mes):
         p_meta = m_day['Gasto_Clean'].sum()
         p_m_baf = m_day[m_day['Prod_Clean'].str.contains('BAF')]['Gasto_Clean'].sum()
         p_m_porta = m_day[m_day['Prod_Clean'].str.contains('PORTA')]['Gasto_Clean'].sum()
+        leads_plat_meta = m_day['Leads_Plataforma'].sum()
             
         g_day = g_ar[g_ar['Fecha_Clean'] == d_val]
         p_goog = g_day['Gasto_Clean'].sum()
         p_g_baf = g_day[g_day['Prod_Clean'].str.contains('BAF')]['Gasto_Clean'].sum()
         p_g_porta = g_day[g_day['Prod_Clean'].str.contains('PORTA')]['Gasto_Clean'].sum()
+        leads_plat_goog = g_day['Leads_Plataforma'].sum()
 
         tot_pres = p_meta + p_goog
         p_baf = p_m_baf + p_g_baf
         p_porta = p_m_porta + p_g_porta
+        tot_leads_plataforma = leads_plat_meta + leads_plat_goog
 
-        b_day = b_all[b_all['Fecha Sesión'].dt.date == d_val]
-        l_day = l_all[l_all['Fecha Ingreso'].dt.date == d_val]
+        b_day = b_all[pd.to_datetime(b_all['Fecha Sesión'], dayfirst=True, errors='coerce').dt.date == d_val]
+        l_day = l_all[pd.to_datetime(l_all['Fecha Ingreso'], dayfirst=True, errors='coerce').dt.date == d_val]
 
         bot_no_id = b_day['Plataforma'].isin(['NAN', 'NONE', '']).sum() + b_day['Plataforma'].isna().sum()
         bot_m_meta = len(b_day[b_day['Plataforma'] == 'META'])
@@ -373,34 +374,45 @@ def calculate_geex_metrics_final(anio, mes):
 
         leads_meta = bot_no_id + bot_m_meta + land_m_meta
         leads_goog = bot_m_goog + land_m_goog
-        leads_tot = leads_meta + leads_goog
+        leads_tot_reales = leads_meta + leads_goog
 
-        bot_m_baf = len(b_day[b_day['Producto'] == 'BAF'])
+        # Para producto: Botmaker NO ID se asume BAF para cuadrar (como en el excel)
+        bot_m_baf = len(b_day[b_day['Producto_Ad'] == 'BAF'])
         land_m_baf = len(l_day[l_day['Producto'] == 'BAF'])
         leads_baf = bot_no_id + bot_m_baf + land_m_baf
         
-        bot_m_porta = len(b_day[b_day['Producto'] == 'PORTA'])
+        bot_m_porta = len(b_day[b_day['Producto_Ad'] == 'PORTA'])
         land_m_porta = len(l_day[l_day['Producto'] == 'PORTA'])
         leads_porta = bot_m_porta + land_m_porta
 
+        cpl_general = tot_pres / leads_tot_reales if leads_tot_reales > 0 else 0
         cpl_meta = p_meta / leads_meta if leads_meta > 0 else 0
         cpl_goog = p_goog / leads_goog if leads_goog > 0 else 0
         cpl_baf = p_baf / leads_baf if leads_baf > 0 else 0
         cpl_porta = p_porta / leads_porta if leads_porta > 0 else 0
 
+        diferencia_leads = (leads_tot_reales / tot_leads_plataforma - 1) if tot_leads_plataforma > 0 else 0
+
         pres_rows.append({
-            'Fecha': d.strftime('%d/%m/%Y'),
+            'Fecha': d.strftime('%m/%d/%Y'),
             'Total ($)': tot_pres,
-            'Meta ($)': p_meta, '% Meta ($)': p_meta / tot_pres if tot_pres > 0 else 0,
-            'Google ($)': p_goog, '% Google ($)': p_goog / tot_pres if tot_pres > 0 else 0,
-            'Baf ($)': p_baf, '% Baf ($)': p_baf / tot_pres if tot_pres > 0 else 0,
-            'Porta ($)': p_porta, '% Porta ($)': p_porta / tot_pres if tot_pres > 0 else 0,
-            'Total Leads': leads_tot,
+            'Meta ($)': p_meta, '% Meta': p_meta / tot_pres if tot_pres > 0 else 0,
+            'Google ($)': p_goog, '% Google': p_goog / tot_pres if tot_pres > 0 else 0,
+            'Baf ($)': p_baf, '% Baf': p_baf / tot_pres if tot_pres > 0 else 0,
+            'Porta ($)': p_porta, '% Porta': p_porta / tot_pres if tot_pres > 0 else 0,
+            
+            'Plataforma (Leads)': tot_leads_plataforma,
+            'Reales (Leads)': leads_tot_reales,
+            'Diferencia': diferencia_leads,
+            'CPL': cpl_general,
+
             'Botmaker no se identifica': bot_no_id,
-            'Meta': leads_meta, 'Landing Meta': land_m_meta, 'Botmaker Meta': bot_m_meta, '% Meta (Leads)': leads_meta / leads_tot if leads_tot > 0 else 0,
-            'Google': leads_goog, 'Landing Google': land_m_goog, '% Google (Leads)': leads_goog / leads_tot if leads_tot > 0 else 0,
-            'BAF': leads_baf, 'Landing BAF': land_m_baf, 'Botmaker BAF': bot_m_baf, '% BAF': leads_baf / leads_tot if leads_tot > 0 else 0,
-            'Porta': leads_porta, 'Landing Porta': land_m_porta, 'Botmaker Porta': bot_m_porta, '% Porta': leads_porta / leads_tot if leads_tot > 0 else 0,
+            'Meta': leads_meta, 'Landing Meta': land_m_meta, 'Botmaker Meta': bot_m_meta, '% Meta (L)': leads_meta / leads_tot_reales if leads_tot_reales > 0 else 0,
+            'Google': leads_goog, 'Landing Google': land_m_goog, 'Botmaker Google': bot_m_goog, '% Google (L)': leads_goog / leads_tot_reales if leads_tot_reales > 0 else 0,
+            
+            'BAF': leads_baf, 'Landing BAF': land_m_baf, 'Botmaker BAF': bot_m_baf, '% BAF': leads_baf / leads_tot_reales if leads_tot_reales > 0 else 0,
+            'Porta': leads_porta, 'Landing Porta': land_m_porta, 'Botmaker Porta': bot_m_porta, '% Porta': leads_porta / leads_tot_reales if leads_tot_reales > 0 else 0,
+            
             'cpl meta': cpl_meta, 'cpl google': cpl_goog,
             'cpl baf': cpl_baf, 'cpl porta': cpl_porta
         })
@@ -892,38 +904,43 @@ with tab_presupuesto:
             if c in money_cols or c in sum_cols:
                 total_row[c] = df[c].sum()
         
+        # Recalcular porcentajes del total para tabla de Plataforma
         if 'Meta ($)' in df.columns:
             tot_pres = total_row.get('Total ($)', 0)
-            total_row['% Meta ($)'] = total_row.get('Meta ($)', 0) / tot_pres if tot_pres > 0 else 0
-            total_row['% Google ($)'] = total_row.get('Google ($)', 0) / tot_pres if tot_pres > 0 else 0
-            total_row['% Baf ($)'] = total_row.get('Baf ($)', 0) / tot_pres if tot_pres > 0 else 0
-            total_row['% Porta ($)'] = total_row.get('Porta ($)', 0) / tot_pres if tot_pres > 0 else 0
+            total_row['% Meta'] = total_row.get('Meta ($)', 0) / tot_pres if tot_pres > 0 else 0
+            total_row['% Google'] = total_row.get('Google ($)', 0) / tot_pres if tot_pres > 0 else 0
+            total_row['% Baf'] = total_row.get('Baf ($)', 0) / tot_pres if tot_pres > 0 else 0
+            total_row['% Porta'] = total_row.get('Porta ($)', 0) / tot_pres if tot_pres > 0 else 0
             
-        elif 'cpl meta' in df.columns:
-            tot_l = total_row.get('Total Leads', 0)
-            total_row['% Meta (Leads)'] = total_row.get('Meta', 0) / tot_l if tot_l > 0 else 0
-            total_row['% Google (Leads)'] = total_row.get('Google', 0) / tot_l if tot_l > 0 else 0
-            tot_meta_dinero = df['Meta ($)'].sum() if 'Meta ($)' in df.columns else df_master['Meta ($)'].sum()
-            tot_goog_dinero = df['Google ($)'].sum() if 'Google ($)' in df.columns else df_master['Google ($)'].sum()
-            total_row['cpl meta'] = tot_meta_dinero / total_row.get('Meta', 1) if total_row.get('Meta', 1) > 0 else 0
-            total_row['cpl google'] = tot_goog_dinero / total_row.get('Google', 1) if total_row.get('Google', 1) > 0 else 0
+        # Recalcular CPL para Leads
+        if 'Diferencia' in df.columns:
+            total_row['Diferencia'] = (total_row.get('Reales (Leads)', 0) / total_row.get('Plataforma (Leads)', 1) - 1) if total_row.get('Plataforma (Leads)', 1) > 0 else 0
+            total_row['CPL'] = df_master['Total ($)'].sum() / total_row.get('Reales (Leads)', 1) if total_row.get('Reales (Leads)', 1) > 0 else 0
 
-        elif 'cpl baf' in df.columns:
-            tot_l = total_row.get('Total Leads', 0)
+        # Recalcular % para tabla REALES por Plataforma
+        if 'Botmaker Meta' in df.columns and 'BAF' not in df.columns:
+            tot_l = total_row.get('Total Reales', 0)
+            total_row['% Meta (L)'] = total_row.get('Meta', 0) / tot_l if tot_l > 0 else 0
+            total_row['% Google (L)'] = total_row.get('Google', 0) / tot_l if tot_l > 0 else 0
+            total_row['cpl meta'] = df_master['Meta ($)'].sum() / total_row.get('Meta', 1) if total_row.get('Meta', 1) > 0 else 0
+            total_row['cpl google'] = df_master['Google ($)'].sum() / total_row.get('Google', 1) if total_row.get('Google', 1) > 0 else 0
+
+        # Recalcular % para tabla REALES por Producto
+        if 'BAF' in df.columns:
+            tot_l = total_row.get('Total Reales', 0)
             total_row['% BAF'] = total_row.get('BAF', 0) / tot_l if tot_l > 0 else 0
             total_row['% Porta'] = total_row.get('Porta', 0) / tot_l if tot_l > 0 else 0
-            tot_baf_dinero = df['Baf ($)'].sum() if 'Baf ($)' in df.columns else df_master['Baf ($)'].sum()
-            tot_porta_dinero = df['Porta ($)'].sum() if 'Porta ($)' in df.columns else df_master['Porta ($)'].sum()
-            total_row['cpl baf'] = tot_baf_dinero / total_row.get('BAF', 1) if total_row.get('BAF', 1) > 0 else 0
-            total_row['cpl porta'] = tot_porta_dinero / total_row.get('Porta', 1) if total_row.get('Porta', 1) > 0 else 0
+            total_row['cpl baf'] = df_master['Baf ($)'].sum() / total_row.get('BAF', 1) if total_row.get('BAF', 1) > 0 else 0
+            total_row['cpl porta'] = df_master['Porta ($)'].sum() / total_row.get('Porta', 1) if total_row.get('Porta', 1) > 0 else 0
             
         return pd.concat([df, pd.DataFrame([total_row])], ignore_index=True)
 
     def style_tot(row):
         return ['background-color: #E8F8F5; font-weight: bold;' if row['Fecha'] == 'TOTAL' else ''] * len(row)
 
+    # 1. PRESUPUESTO PLATAFORMA (Y PRODUCTO)
     st.markdown("<div class='sub-header'>1. PRESUPUESTO PLATAFORMA Y PRODUCTO</div>", unsafe_allow_html=True)
-    df_gastos = df_master[['Fecha', 'Total ($)', 'Meta ($)', '% Meta ($)', 'Google ($)', '% Google ($)', 'Baf ($)', '% Baf ($)', 'Porta ($)', '% Porta ($)']].copy()
+    df_gastos = df_master[['Fecha', 'Total ($)', 'Meta ($)', '% Meta', 'Google ($)', '% Google', 'Baf ($)', '% Baf', 'Porta ($)', '% Porta']].copy()
     df_gastos = df_gastos[(df_gastos['Total ($)'] > 0) | (df_gastos['Meta ($)'] > 0) | (df_gastos['Google ($)'] > 0)].copy()
     
     if df_gastos.empty:
@@ -932,39 +949,50 @@ with tab_presupuesto:
         df_gastos = append_total_row(df_gastos, ['Total ($)', 'Meta ($)', 'Google ($)', 'Baf ($)', 'Porta ($)'], [])
         st.dataframe(df_gastos.style.format({
             'Total ($)': '${:,.2f}', 'Meta ($)': '${:,.2f}', 'Google ($)': '${:,.2f}', 'Baf ($)': '${:,.2f}', 'Porta ($)': '${:,.2f}',
-            '% Meta ($)': '{:.0%}', '% Google ($)': '{:.0%}', '% Baf ($)': '{:.0%}', '% Porta ($)': '{:.0%}'
+            '% Meta': '{:.0%}', '% Google': '{:.0%}', '% Baf': '{:.0%}', '% Porta': '{:.0%}'
         }).apply(style_tot, axis=1), use_container_width=True, height=450)
 
-    st.markdown("<div class='sub-header'>2. REALES Y CPL (Por Plataforma)</div>", unsafe_allow_html=True)
-    df_reales_plat = df_master[['Fecha', 'Total Leads', 'Botmaker no se identifica', 'Meta', 'Landing Meta', 'Botmaker Meta', '% Meta (Leads)', 'Google', 'Landing Google', '% Google (Leads)', 'cpl meta', 'cpl google', 'Meta ($)', 'Google ($)']].copy()
-    df_reales_plat['cpl meta'] = df_reales_plat['cpl meta'].replace([np.inf, -np.inf], 0)
-    df_reales_plat['cpl google'] = df_reales_plat['cpl google'].replace([np.inf, -np.inf], 0)
+    # 2. LEADS
+    st.markdown("<div class='sub-header'>2. LEADS Y CPL</div>", unsafe_allow_html=True)
+    df_leads_cpl = df_master[['Fecha', 'Plataforma (Leads)', 'Reales (Leads)', 'Diferencia', 'CPL']].copy()
+    df_leads_cpl = df_leads_cpl[df_leads_cpl['Reales (Leads)'] > 0].copy()
     
-    df_reales_plat = df_reales_plat[(df_reales_plat['Total Leads'] > 0) | (df_reales_plat['Meta ($)'] > 0) | (df_reales_plat['Google ($)'] > 0)].copy()
-    if df_reales_plat.empty:
-        st.info("No hay datos de leads por plataforma registrados aún.")
+    if df_leads_cpl.empty:
+        st.info("No hay leads registrados.")
     else:
-        sum_cols_plat = ['Total Leads', 'Botmaker no se identifica', 'Meta', 'Landing Meta', 'Botmaker Meta', 'Google', 'Landing Google']
-        df_show_plat = df_reales_plat.drop(columns=['Meta ($)', 'Google ($)'])
-        df_show_plat = append_total_row(df_show_plat, [], sum_cols_plat)
-        st.dataframe(df_show_plat.style.format({
+        df_leads_cpl = append_total_row(df_leads_cpl, [], ['Plataforma (Leads)', 'Reales (Leads)'])
+        st.dataframe(df_leads_cpl.style.format({
+            'Diferencia': '{:.0%}', 'CPL': '${:,.2f}'
+        }).apply(style_tot, axis=1), use_container_width=True, height=450)
+
+    # 3. REALES (Por Plataforma)
+    st.markdown("<div class='sub-header'>3. REALES (Por Plataforma)</div>", unsafe_allow_html=True)
+    df_r_plat = df_master[['Fecha', 'Reales (Leads)', 'Botmaker no se identifica', 'Meta', 'Landing Meta', 'Botmaker Meta', '% Meta (L)', 'Google', 'Landing Google', 'Botmaker Google', '% Google (L)', 'cpl meta', 'cpl google']].copy()
+    df_r_plat.rename(columns={'Reales (Leads)': 'Total Reales'}, inplace=True)
+    df_r_plat = df_r_plat[df_r_plat['Total Reales'] > 0].copy()
+    
+    if df_r_plat.empty:
+        st.info("No hay leads reales registrados.")
+    else:
+        sum_cols_plat = ['Total Reales', 'Botmaker no se identifica', 'Meta', 'Landing Meta', 'Botmaker Meta', 'Google', 'Landing Google', 'Botmaker Google']
+        df_r_plat = append_total_row(df_r_plat, [], sum_cols_plat)
+        st.dataframe(df_r_plat.style.format({
             'cpl meta': '${:,.2f}', 'cpl google': '${:,.2f}',
-            '% Meta (Leads)': '{:.0%}', '% Google (Leads)': '{:.0%}'
+            '% Meta (L)': '{:.0%}', '% Google (L)': '{:.0%}'
         }).apply(style_tot, axis=1), use_container_width=True, height=450)
 
-    st.markdown("<div class='sub-header'>3. REALES Y CPL (Por Producto)</div>", unsafe_allow_html=True)
-    df_reales_prod = df_master[['Fecha', 'Total Leads', 'Botmaker no se identifica', 'BAF', 'Landing BAF', 'Botmaker BAF', '% BAF', 'Porta', 'Landing Porta', 'Botmaker Porta', '% Porta', 'cpl baf', 'cpl porta', 'Baf ($)', 'Porta ($)']].copy()
-    df_reales_prod['cpl baf'] = df_reales_prod['cpl baf'].replace([np.inf, -np.inf], 0)
-    df_reales_prod['cpl porta'] = df_reales_prod['cpl porta'].replace([np.inf, -np.inf], 0)
+    # 4. REALES (Por Producto)
+    st.markdown("<div class='sub-header'>4. REALES (Por Producto)</div>", unsafe_allow_html=True)
+    df_r_prod = df_master[['Fecha', 'Reales (Leads)', 'Botmaker no se identifica', 'BAF', 'Landing BAF', 'Botmaker BAF', '% BAF', 'Porta', 'Landing Porta', 'Botmaker Porta', '% Porta', 'cpl baf', 'cpl porta']].copy()
+    df_r_prod.rename(columns={'Reales (Leads)': 'Total Reales'}, inplace=True)
+    df_r_prod = df_r_prod[df_r_prod['Total Reales'] > 0].copy()
     
-    df_reales_prod = df_reales_prod[(df_reales_prod['Total Leads'] > 0) | (df_reales_prod['Baf ($)'] > 0) | (df_reales_prod['Porta ($)'] > 0)].copy()
-    if df_reales_prod.empty:
-        st.info("No hay datos de leads por producto registrados aún.")
+    if df_r_prod.empty:
+        st.info("No hay leads reales registrados.")
     else:
-        sum_cols_prod = ['Total Leads', 'Botmaker no se identifica', 'BAF', 'Landing BAF', 'Botmaker BAF', 'Porta', 'Landing Porta', 'Botmaker Porta']
-        df_show_prod = df_reales_prod.drop(columns=['Baf ($)', 'Porta ($)'])
-        df_show_prod = append_total_row(df_show_prod, [], sum_cols_prod)
-        st.dataframe(df_show_prod.style.format({
+        sum_cols_prod = ['Total Reales', 'Botmaker no se identifica', 'BAF', 'Landing BAF', 'Botmaker BAF', 'Porta', 'Landing Porta', 'Botmaker Porta']
+        df_r_prod = append_total_row(df_r_prod, [], sum_cols_prod)
+        st.dataframe(df_r_prod.style.format({
             'cpl baf': '${:,.2f}', 'cpl porta': '${:,.2f}',
             '% BAF': '{:.0%}', '% Porta': '{:.0%}'
         }).apply(style_tot, axis=1), use_container_width=True, height=450)
