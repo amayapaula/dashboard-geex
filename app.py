@@ -57,8 +57,6 @@ with col_filtro:
 @st.cache_data
 def load_raw_data_final():
     carpeta = "datos"
-    
-    # Si ejecutaste preparar_datos.py, lee los parquets ultra rápidos
     if os.path.exists(os.path.join(carpeta, "horas.parquet")):
         horas = pd.read_parquet(os.path.join(carpeta, "horas.parquet"))
         porta = pd.read_parquet(os.path.join(carpeta, "porta.parquet"))
@@ -70,8 +68,6 @@ def load_raw_data_final():
         meta_df = pd.read_parquet(os.path.join(carpeta, "meta.parquet"))
         google_df = pd.read_parquet(os.path.join(carpeta, "google.parquet"))
         
-        # Como preparar_datos unificó todo en la columna "Fecha",
-        # recreamos los nombres originales para que TUS cálculos funcionen perfecto sin tocarlos:
         porta['Fecha'] = porta['Fecha']
         porta['Fecha inicio'] = porta['Fecha']
         ln['Fecha'] = ln['Fecha']
@@ -79,13 +75,11 @@ def load_raw_data_final():
         baf['Fecha'] = baf['Fecha']
         baf['Fecha Inicio'] = baf['Fecha']
         botmaker['Fecha Sesión'] = botmaker['Fecha']
-        bot_anuncios['Fecha'] = pd.NaT  # El original no usaba esta fecha
+        bot_anuncios['Fecha'] = pd.NaT
         landing['Fecha Ingreso'] = landing['Fecha']
         meta_df['Día'] = meta_df['Fecha']
         google_df['Día'] = google_df['Fecha']
-        
     else:
-        # Respaldo: si no existe la carpeta datos, lee el Excel lento
         xls = pd.ExcelFile('DASHHHHH.xlsx')
         horas = pd.read_excel(xls, 'RAW_horas')
         porta = pd.read_excel(xls, 'RAW_portaAR')
@@ -286,8 +280,11 @@ def calculate_geex_metrics_final(anio, mes):
     # ==========================================
     # --- PRESUPUESTO DIARIO, REALES Y CPL ---
     # ==========================================
-    m_ar = meta_raw[(meta_raw['Pais'] == 'AR') & (meta_raw['Producto'].isin(['BAF', 'PORTA', 'LN']))].copy()
-    g_ar = google_raw[google_raw['Pais'] == 'AR'].copy()
+    m_ar = meta_raw[meta_raw['Pais'].astype(str).str.strip().str.upper() == 'AR'].copy()
+    m_ar['Prod_Clean'] = m_ar['Producto'].astype(str).str.strip().str.upper()
+
+    g_ar = google_raw[google_raw['Pais'].astype(str).str.strip().str.upper() == 'AR'].copy()
+    g_ar['Prod_Clean'] = g_ar['Producto'].astype(str).str.strip().str.upper()
     g_ar['Costo_Final'] = g_ar['Costo num'] if 'Costo num' in g_ar.columns else g_ar['Costo']
 
     b_all = bot_raw.copy()
@@ -305,7 +302,18 @@ def calculate_geex_metrics_final(anio, mes):
     b_all['Plataforma'] = b_all['Plataforma'].astype(str).str.strip().str.upper()
     b_all['Producto'] = b_all['Producto'].astype(str).str.strip().str.upper()
 
-    dates_presupuesto = pd.date_range(start_date, end_date)
+    # Fechas de facturación exactas según mes
+    if mes == 10:
+        start_d = pd.Timestamp('2026-10-01')
+        end_d = pd.Timestamp('2026-10-31')
+    elif mes == 11:
+        start_d = pd.Timestamp('2026-10-29')
+        end_d = pd.Timestamp('2026-11-26')
+    else:
+        start_d = pd.Timestamp(year=anio, month=mes, day=1)
+        end_d = start_d + pd.offsets.MonthEnd(1)
+
+    dates_presupuesto = pd.date_range(start_d, end_d)
     pres_rows = []
     
     for d in dates_presupuesto:
@@ -323,16 +331,16 @@ def calculate_geex_metrics_final(anio, mes):
         if in_meta:
             m_day = m_ar[m_ar['Día'].dt.date == d_val]
             p_meta = m_day['Monto gastado (ARS)'].sum()
-            p_m_baf = m_day[m_day['Producto'] == 'BAF']['Monto gastado (ARS)'].sum()
-            p_m_porta = m_day[m_day['Producto'] == 'PORTA']['Monto gastado (ARS)'].sum()
+            p_m_baf = m_day[m_day['Prod_Clean'] == 'BAF']['Monto gastado (ARS)'].sum()
+            p_m_porta = m_day[m_day['Prod_Clean'] == 'PORTA']['Monto gastado (ARS)'].sum()
         else:
             p_meta = p_m_baf = p_m_porta = 0
             
         if in_goog:
             g_day = g_ar[g_ar['Día'].dt.date == d_val]
             p_goog = g_day['Costo_Final'].sum()
-            p_g_baf = g_day[g_day['Producto'] == 'BAF']['Costo_Final'].sum()
-            p_g_porta = g_day[g_day['Producto'] == 'PORTA']['Costo_Final'].sum()
+            p_g_baf = g_day[g_day['Prod_Clean'] == 'BAF']['Costo_Final'].sum()
+            p_g_porta = g_day[g_day['Prod_Clean'] == 'PORTA']['Costo_Final'].sum()
         else:
             p_goog = p_g_baf = p_g_porta = 0
 
@@ -408,55 +416,92 @@ except Exception as e:
     st.error(f"Ocurrió un error procesando los datos: {e}")
     st.stop()
 
-# --- AQUÍ DEFINIMOS LAS 6 PESTAÑAS (Resumen Histórico + Las 5 Originales) ---
 tab_historico, tab_prod, tab_asesores, tab_datos, tab_efectividad, tab_presupuesto = st.tabs([
     "Resumen Histórico", "Productividad", "Asesores", "Datos", "Efectividad", "Presupuesto"
 ])
 
-# --- 1. PESTAÑA HISTÓRICO (La nueva tabla estática desde Marzo) ---
+# --- 1. PESTAÑA HISTÓRICO (Con flechas comparativas respecto al mes anterior) ---
 with tab_historico:
     st.markdown("<div class='section-header'>Resumen Histórico Operativo (CC 6 a CC 11)</div>", unsafe_allow_html=True)
-    st.info("Vista consolidada por mes con métricas de ventas, SPH general, inversión y CPL.")
+    st.info("Vista consolidada por mes con comparativa respecto al mes anterior.")
 
-    # 1. TABLA GENERAL CONSOLIDADA
-    datos_generales = [
-        {"CC": 6, "Mes": "Junio", "Porta": 518, "LN": 350, "BAF": 560, "Ventas Totales": 1428, "Horas Total": 3150, "SPH Total": "0.45", "SPH BAF+Porta": "0.34", "Leads Totales": "16,834", "Efectividad": "8%", "Presupuesto Ciclo": "$33.831.810,37", "CPL Mensual": "$2.009,73", "CPL Ciclo": "$1.638,50"},
-        {"CC": 7, "Mes": "Julio", "Porta": 399, "LN": 395, "BAF": 540, "Ventas Totales": 1334, "Horas Total": 3156, "SPH Total": "0.42", "SPH BAF+Porta": "0.30", "Leads Totales": "18,110", "Efectividad": "7%", "Presupuesto Ciclo": "$34.736.333,59", "CPL Mensual": "$1.918,07", "CPL Ciclo": "$2.092,93"},
-        {"CC": 8, "Mes": "Agosto", "Porta": 542, "LN": 365, "BAF": 494, "Ventas Totales": 1401, "Horas Total": 3030, "SPH Total": "0.46", "SPH BAF+Porta": "0.34", "Leads Totales": "15,567", "Efectividad": "9%", "Presupuesto Ciclo": "$37.593.975,01", "CPL Mensual": "$2.414,98", "CPL Ciclo": "$2.673,25"},
-        {"CC": 9, "Mes": "Septiembre", "Porta": 511, "LN": 248, "BAF": 444, "Ventas Totales": 1203, "Horas Total": 3282, "SPH Total": "0.37", "SPH BAF+Porta": "0.29", "Leads Totales": "10,866", "Efectividad": "11%", "Presupuesto Ciclo": "$37.823.181,54", "CPL Mensual": "$3.480,87", "CPL Ciclo": "$2.963,73"},
-        {"CC": 10, "Mes": "Octubre", "Porta": 366, "LN": 230, "BAF": 469, "Ventas Totales": 1065, "Horas Total": 2208, "SPH Total": "0.48", "SPH BAF+Porta": "0.38", "Leads Totales": "12,412", "Efectividad": "9%", "Presupuesto Ciclo": "$29.823.696,35", "CPL Mensual": "$2.402,81", "CPL Ciclo": "$2.606,97"},
-        {"CC": 11, "Mes": "Noviembre", "Porta": 29, "LN": 20, "BAF": 37, "Ventas Totales": 86, "Horas Total": 216, "SPH Total": "0.40", "SPH BAF+Porta": "0.31", "Leads Totales": "1,382", "Efectividad": "6%", "Presupuesto Ciclo": "$457.590,32", "CPL Mensual": "$331,11", "CPL Ciclo": "$227,09"}
+    # Función para agregar flechas comparativas
+    def add_comparison_arrows(data_list, num_cols, lower_is_better_cols=None):
+        if lower_is_better_cols is None: lower_is_better_cols = []
+        out = []
+        for i, row in enumerate(data_list):
+            new_row = {}
+            for k, v in row.items():
+                if k in num_cols:
+                    is_lower_better = k in lower_is_better_cols
+                    if i == 0:
+                        arrow = ""
+                    else:
+                        prev_v = data_list[i-1][k]
+                        if v > prev_v:
+                            arrow = " 🔴 ↑" if is_lower_better else " 🟢 ↑"
+                        elif v < prev_v:
+                            arrow = " 🟢 ↓" if is_lower_better else " 🔴 ↓"
+                        else:
+                            arrow = " ➖"
+                    
+                    if k in ["SPH Total", "SPH BAF+Porta", "SPH Mañana", "SPH Tarde"]:
+                        val_str = f"{v:.2f}"
+                    elif k in ["Efectividad"]:
+                        val_str = f"{v:.0%}" if isinstance(v, float) and v <= 1 else f"{v}"
+                    elif "Presupuesto" in k or "CPL" in k:
+                        val_str = f"${v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                    elif k in ["Leads Totales", "Horas Total", "Horas Mañana", "Horas Tarde"]:
+                        val_str = f"{v:,}".replace(",", ".")
+                    else:
+                        val_str = f"{v}"
+                    
+                    new_row[k] = f"{val_str}{arrow}"
+                else:
+                    new_row[k] = v
+            out.append(new_row)
+        return pd.DataFrame(out)
+
+    datos_generales_raw = [
+        {"CC": 6, "Mes": "Junio", "Porta": 518, "LN": 350, "BAF": 560, "Ventas Totales": 1428, "Horas Total": 3150, "SPH Total": 0.45, "SPH BAF+Porta": 0.34, "Leads Totales": 16834, "Efectividad": 0.08, "Presupuesto Ciclo": 33831810.37, "CPL Mensual": 2009.73, "CPL Ciclo": 1638.50},
+        {"CC": 7, "Mes": "Julio", "Porta": 399, "LN": 395, "BAF": 540, "Ventas Totales": 1334, "Horas Total": 3156, "SPH Total": 0.42, "SPH BAF+Porta": 0.30, "Leads Totales": 18110, "Efectividad": 0.07, "Presupuesto Ciclo": 34736333.59, "CPL Mensual": 1918.07, "CPL Ciclo": 2092.93},
+        {"CC": 8, "Mes": "Agosto", "Porta": 542, "LN": 365, "BAF": 494, "Ventas Totales": 1401, "Horas Total": 3030, "SPH Total": 0.46, "SPH BAF+Porta": 0.34, "Leads Totales": 15567, "Efectividad": 0.09, "Presupuesto Ciclo": 37593975.01, "CPL Mensual": 2414.98, "CPL Ciclo": 2673.25},
+        {"CC": 9, "Mes": "Septiembre", "Porta": 511, "LN": 248, "BAF": 444, "Ventas Totales": 1203, "Horas Total": 3282, "SPH Total": 0.37, "SPH BAF+Porta": 0.29, "Leads Totales": 10866, "Efectividad": 0.11, "Presupuesto Ciclo": 37823181.54, "CPL Mensual": 3480.87, "CPL Ciclo": 2963.73},
+        {"CC": 10, "Mes": "Octubre", "Porta": 366, "LN": 230, "BAF": 469, "Ventas Totales": 1065, "Horas Total": 2208, "SPH Total": 0.48, "SPH BAF+Porta": 0.38, "Leads Totales": 12412, "Efectividad": 0.09, "Presupuesto Ciclo": 29823696.35, "CPL Mensual": 2402.81, "CPL Ciclo": 2606.97},
+        {"CC": 11, "Mes": "Noviembre", "Porta": 29, "LN": 20, "BAF": 37, "Ventas Totales": 86, "Horas Total": 216, "SPH Total": 0.40, "SPH BAF+Porta": 0.31, "Leads Totales": 1382, "Efectividad": 0.06, "Presupuesto Ciclo": 457590.32, "CPL Mensual": 331.11, "CPL Ciclo": 227.09}
     ]
-    st.dataframe(pd.DataFrame(datos_generales), use_container_width=True, hide_index=True)
+    cols_gen = ["Porta", "LN", "BAF", "Ventas Totales", "Horas Total", "SPH Total", "SPH BAF+Porta", "Leads Totales", "Efectividad", "Presupuesto Ciclo", "CPL Mensual", "CPL Ciclo"]
+    df_gen_show = add_comparison_arrows(datos_generales_raw, cols_gen, ["CPL Mensual", "CPL Ciclo"])
+    st.dataframe(df_gen_show, use_container_width=True, hide_index=True)
 
     st.markdown("<div class='section-header'>Desglose Histórico por Turnos (Mañana vs Tarde)</div>", unsafe_allow_html=True)
-    
-    # 2. DESGLOSE POR TURNOS
     sub_m, sub_t = st.tabs(["Turno Mañana (Yamil)", "Turno Tarde (Soledad)"])
     
     with sub_m:
-        datos_manana = [
-            {"CC": 6, "Mes": "Junio", "Horas Mañana": 1728, "Porta": 295, "LN": 180, "BAF": 274, "Total Yamil": 749, "SPH Mañana": "0.43", "SPH BAF+Porta": "0.33"},
-            {"CC": 7, "Mes": "Julio", "Horas Mañana": 1728, "Porta": 203, "LN": 206, "BAF": 265, "Total Yamil": 674, "SPH Mañana": "0.39", "SPH BAF+Porta": "0.27"},
-            {"CC": 8, "Mes": "Agosto", "Horas Mañana": 1962, "Porta": 375, "LN": 213, "BAF": 336, "Total Yamil": 924, "SPH Mañana": "0.47", "SPH BAF+Porta": "0.36"},
-            {"CC": 9, "Mes": "Septiembre", "Horas Mañana": 2184, "Porta": 329, "LN": 130, "BAF": 333, "Total Yamil": 792, "SPH Mañana": "0.36", "SPH BAF+Porta": "0.30"},
-            {"CC": 10, "Mes": "Octubre", "Horas Mañana": 1506, "Porta": 253, "LN": 130, "BAF": 336, "Total Yamil": 719, "SPH Mañana": "0.48", "SPH BAF+Porta": "0.39"},
-            {"CC": 11, "Mes": "Noviembre", "Horas Mañana": 144, "Porta": 17, "LN": 11, "BAF": 20, "Total Yamil": 48, "SPH Mañana": "0.33", "SPH BAF+Porta": "0.26"}
+        datos_manana_raw = [
+            {"CC": 6, "Mes": "Junio", "Horas Mañana": 1728, "Porta": 295, "LN": 180, "BAF": 274, "Total Yamil": 749, "SPH Mañana": 0.43, "SPH BAF+Porta": 0.33},
+            {"CC": 7, "Mes": "Julio", "Horas Mañana": 1728, "Porta": 203, "LN": 206, "BAF": 265, "Total Yamil": 674, "SPH Mañana": 0.39, "SPH BAF+Porta": 0.27},
+            {"CC": 8, "Mes": "Agosto", "Horas Mañana": 1962, "Porta": 375, "LN": 213, "BAF": 336, "Total Yamil": 924, "SPH Mañana": 0.47, "SPH BAF+Porta": 0.36},
+            {"CC": 9, "Mes": "Septiembre", "Horas Mañana": 2184, "Porta": 329, "LN": 130, "BAF": 333, "Total Yamil": 792, "SPH Mañana": 0.36, "SPH BAF+Porta": 0.30},
+            {"CC": 10, "Mes": "Octubre", "Horas Mañana": 1506, "Porta": 253, "LN": 130, "BAF": 336, "Total Yamil": 719, "SPH Mañana": 0.48, "SPH BAF+Porta": 0.39},
+            {"CC": 11, "Mes": "Noviembre", "Horas Mañana": 144, "Porta": 17, "LN": 11, "BAF": 20, "Total Yamil": 48, "SPH Mañana": 0.33, "SPH BAF+Porta": 0.26}
         ]
-        st.dataframe(pd.DataFrame(datos_manana), use_container_width=True, hide_index=True)
+        cols_m = ["Horas Mañana", "Porta", "LN", "BAF", "Total Yamil", "SPH Mañana", "SPH BAF+Porta"]
+        st.dataframe(add_comparison_arrows(datos_manana_raw, cols_m), use_container_width=True, hide_index=True)
 
     with sub_t:
-        datos_tarde = [
-            {"CC": 6, "Mes": "Junio", "Horas Tarde": 1422, "Porta": 223, "LN": 170, "BAF": 286, "Total Tarde": 679, "SPH Tarde": "0.48", "SPH BAF+Porta": "0.36"},
-            {"CC": 7, "Mes": "Julio", "Horas Tarde": 1428, "Porta": 196, "LN": 189, "BAF": 275, "Total Tarde": 660, "SPH Tarde": "0.46", "SPH BAF+Porta": "0.33"},
-            {"CC": 8, "Mes": "Agosto", "Horas Tarde": 1068, "Porta": 167, "LN": 152, "BAF": 158, "Total Tarde": 477, "SPH Tarde": "0.45", "SPH BAF+Porta": "0.30"},
-            {"CC": 9, "Mes": "Septiembre", "Horas Tarde": 1098, "Porta": 182, "LN": 118, "BAF": 111, "Total Tarde": 411, "SPH Tarde": "0.37", "SPH BAF+Porta": "0.27"},
-            {"CC": 10, "Mes": "Octubre", "Horas Tarde": 702, "Porta": 113, "LN": 100, "BAF": 133, "Total Tarde": 346, "SPH Tarde": "0.49", "SPH BAF+Porta": "0.35"},
-            {"CC": 11, "Mes": "Noviembre", "Horas Tarde": 72, "Porta": 12, "LN": 9, "BAF": 17, "Total Tarde": 38, "SPH Tarde": "0.53", "SPH BAF+Porta": "0.40"}
+        datos_tarde_raw = [
+            {"CC": 6, "Mes": "Junio", "Horas Tarde": 1422, "Porta": 223, "LN": 170, "BAF": 286, "Total Tarde": 679, "SPH Tarde": 0.48, "SPH BAF+Porta": 0.36},
+            {"CC": 7, "Mes": "Julio", "Horas Tarde": 1428, "Porta": 196, "LN": 189, "BAF": 275, "Total Tarde": 660, "SPH Tarde": 0.46, "SPH BAF+Porta": 0.33},
+            {"CC": 8, "Mes": "Agosto", "Horas Tarde": 1068, "Porta": 167, "LN": 152, "BAF": 158, "Total Tarde": 477, "SPH Tarde": 0.45, "SPH BAF+Porta": 0.30},
+            {"CC": 9, "Mes": "Septiembre", "Horas Tarde": 1098, "Porta": 182, "LN": 118, "BAF": 111, "Total Tarde": 411, "SPH Tarde": 0.37, "SPH BAF+Porta": 0.27},
+            {"CC": 10, "Mes": "Octubre", "Horas Tarde": 702, "Porta": 113, "LN": 100, "BAF": 133, "Total Tarde": 346, "SPH Tarde": 0.49, "SPH BAF+Porta": 0.35},
+            {"CC": 11, "Mes": "Noviembre", "Horas Tarde": 72, "Porta": 12, "LN": 9, "BAF": 17, "Total Tarde": 38, "SPH Tarde": 0.53, "SPH BAF+Porta": 0.40}
         ]
-        st.dataframe(pd.DataFrame(datos_tarde), use_container_width=True, hide_index=True)
+        cols_t = ["Horas Tarde", "Porta", "LN", "BAF", "Total Tarde", "SPH Tarde", "SPH BAF+Porta"]
+        st.dataframe(add_comparison_arrows(datos_tarde_raw, cols_t), use_container_width=True, hide_index=True)
 
-# --- 2. PESTAÑA PRODUCTIVIDAD (Exactamente tu código) ---
+# --- 2. PESTAÑA PRODUCTIVIDAD ---
 with tab_prod:
     c1, c2, c3, c4, c5, c6, c7, c8, c9 = st.columns(9)
     with c1: st.markdown(f"<div class='metric-card'><div class='metric-label'>Ventas Brutas</div><div class='metric-value'>{m['v_totales']}</div></div>", unsafe_allow_html=True)
@@ -500,7 +545,7 @@ with tab_prod:
 
         st.dataframe(df_clean.style.apply(style_geex_dataframe, axis=1), use_container_width=True, hide_index=True, height=600)
 
-# --- 3. PESTAÑA ASESORES (Exactamente tu código) ---
+# --- 3. PESTAÑA ASESORES ---
 with tab_asesores:
     modo_vista = st.radio("Seleccionar Vista", ["Resumen Mensual", "Evolución Diaria / Por Asesor"], horizontal=True, key="vista_asesores_radio")
     df_as = m['df_asesores'].copy()
@@ -617,7 +662,7 @@ with tab_asesores:
             st.markdown(f"**Evolución Diaria para: {asesor_seleccionado}**")
             st.dataframe(df_evol.style.apply(style_evol, axis=1), use_container_width=True, hide_index=True, height=650)
 
-# --- 4. PESTAÑA DATOS (Exactamente tu código, con la función de filtros interactiva `display_planes_filtered`) ---
+# --- 4. PESTAÑA DATOS ---
 with tab_datos:
     st.markdown("#### Ingresos de Leads por Día (Landing vs Botmaker)")
     if m['df_leads_d'].empty:
@@ -657,7 +702,6 @@ with tab_datos:
     
     st.markdown("---")
     
-    # LA FUNCIÓN DE FILTROS ORIGINAL Y COMPLETA ESTÁ AQUÍ
     def display_planes_filtered(pivot_df, title, filter_key):
         if pivot_df.empty:
             st.info(f"No hay datos para {title}")
@@ -699,7 +743,7 @@ with tab_datos:
     with sub_t2: display_planes_filtered(m['esim_pivot'], "Filtrar Tipo eSIM", f"f_esim_{mes_sel}")
     with sub_t3: display_planes_filtered(m['baf_pivot'], "Filtrar Planes BAF", f"f_baf_{mes_sel}")
 
-# --- 5. PESTAÑA EFECTIVIDAD (Exactamente tu código) ---
+# --- 5. PESTAÑA EFECTIVIDAD ---
 with tab_efectividad:
     format_dict = {
         'Leads': '{:,.0f}', 'Efectividad': '{:.2%}',
@@ -817,7 +861,7 @@ with tab_efectividad:
         st.markdown("#### Campaña: BAF")
         st.dataframe(get_campaign_ad_table('BAF').style.format(format_dict), use_container_width=True, height=350)
 
-# --- 6. PESTAÑA PRESUPUESTO (Exactamente tu código) ---
+# --- 6. PESTAÑA PRESUPUESTO ---
 with tab_presupuesto:
     st.markdown("<div class='section-header'>Presupuesto Diario y Periodos de Facturación</div>", unsafe_allow_html=True)
     
@@ -828,7 +872,7 @@ with tab_presupuesto:
 
     df_master = m['df_pres_master'].copy()
 
-    def append_total_row(df, money_cols, sum_cols, pct_logic):
+    def append_total_row(df, money_cols, sum_cols):
         if df.empty: return df
         total_row = {'Fecha': 'TOTAL'}
         for c in df.columns:
@@ -846,8 +890,8 @@ with tab_presupuesto:
             tot_l = total_row.get('Total Leads', 0)
             total_row['% Meta (Leads)'] = total_row.get('Meta', 0) / tot_l if tot_l > 0 else 0
             total_row['% Google (Leads)'] = total_row.get('Google', 0) / tot_l if tot_l > 0 else 0
-            tot_meta_dinero = df_master['Meta ($)'].sum()
-            tot_goog_dinero = df_master['Google ($)'].sum()
+            tot_meta_dinero = df['Meta ($)'].sum() if 'Meta ($)' in df.columns else df_master['Meta ($)'].sum()
+            tot_goog_dinero = df['Google ($)'].sum() if 'Google ($)' in df.columns else df_master['Google ($)'].sum()
             total_row['cpl meta'] = tot_meta_dinero / total_row.get('Meta', 1) if total_row.get('Meta', 1) > 0 else 0
             total_row['cpl google'] = tot_goog_dinero / total_row.get('Google', 1) if total_row.get('Google', 1) > 0 else 0
 
@@ -855,8 +899,8 @@ with tab_presupuesto:
             tot_l = total_row.get('Total Leads', 0)
             total_row['% BAF'] = total_row.get('BAF', 0) / tot_l if tot_l > 0 else 0
             total_row['% Porta'] = total_row.get('Porta', 0) / tot_l if tot_l > 0 else 0
-            tot_baf_dinero = df_master['Baf ($)'].sum()
-            tot_porta_dinero = df_master['Porta ($)'].sum()
+            tot_baf_dinero = df['Baf ($)'].sum() if 'Baf ($)' in df.columns else df_master['Baf ($)'].sum()
+            tot_porta_dinero = df['Porta ($)'].sum() if 'Porta ($)' in df.columns else df_master['Porta ($)'].sum()
             total_row['cpl baf'] = tot_baf_dinero / total_row.get('BAF', 1) if total_row.get('BAF', 1) > 0 else 0
             total_row['cpl porta'] = tot_porta_dinero / total_row.get('Porta', 1) if total_row.get('Porta', 1) > 0 else 0
             
@@ -867,37 +911,47 @@ with tab_presupuesto:
 
     st.markdown("<div class='sub-header'>1. PRESUPUESTO PLATAFORMA Y PRODUCTO</div>", unsafe_allow_html=True)
     df_gastos = df_master[['Fecha', 'Total ($)', 'Meta ($)', '% Meta ($)', 'Google ($)', '% Google ($)', 'Baf ($)', '% Baf ($)', 'Porta ($)', '% Porta ($)']].copy()
-    df_gastos = append_total_row(df_gastos, ['Total ($)', 'Meta ($)', 'Google ($)', 'Baf ($)', 'Porta ($)'], [], True)
-    
-    st.dataframe(df_gastos.style.format({
-        'Total ($)': '${:,.2f}', 'Meta ($)': '${:,.2f}', 'Google ($)': '${:,.2f}', 'Baf ($)': '${:,.2f}', 'Porta ($)': '${:,.2f}',
-        '% Meta ($)': '{:.0%}', '% Google ($)': '{:.0%}', '% Baf ($)': '{:.0%}', '% Porta ($)': '{:.0%}'
-    }).apply(style_tot, axis=1), use_container_width=True, height=450)
+    # Filtrar solo días con presupuesto o datos
+    df_gastos = df_gastos[df_gastos['Total ($)'] > 0].copy()
+    if df_gastos.empty:
+        st.info("No hay datos de presupuesto registrados aún para el período seleccionado.")
+    else:
+        df_gastos = append_total_row(df_gastos, ['Total ($)', 'Meta ($)', 'Google ($)', 'Baf ($)', 'Porta ($)'], [])
+        st.dataframe(df_gastos.style.format({
+            'Total ($)': '${:,.2f}', 'Meta ($)': '${:,.2f}', 'Google ($)': '${:,.2f}', 'Baf ($)': '${:,.2f}', 'Porta ($)': '${:,.2f}',
+            '% Meta ($)': '{:.0%}', '% Google ($)': '{:.0%}', '% Baf ($)': '{:.0%}', '% Porta ($)': '{:.0%}'
+        }).apply(style_tot, axis=1), use_container_width=True, height=450)
 
     st.markdown("<div class='sub-header'>2. REALES Y CPL (Por Plataforma)</div>", unsafe_allow_html=True)
     df_reales_plat = df_master[['Fecha', 'Total Leads', 'Botmaker no se identifica', 'Meta', 'Landing Meta', 'Botmaker Meta', '% Meta (Leads)', 'Google', 'Landing Google', '% Google (Leads)', 'cpl meta', 'cpl google']].copy()
-    
     df_reales_plat['cpl meta'] = df_reales_plat['cpl meta'].replace([np.inf, -np.inf], 0)
     df_reales_plat['cpl google'] = df_reales_plat['cpl google'].replace([np.inf, -np.inf], 0)
     
-    sum_cols_plat = ['Total Leads', 'Botmaker no se identifica', 'Meta', 'Landing Meta', 'Botmaker Meta', 'Google', 'Landing Google']
-    df_reales_plat = append_total_row(df_reales_plat, [], sum_cols_plat, True)
-    
-    st.dataframe(df_reales_plat.style.format({
-        'cpl meta': '${:,.2f}', 'cpl google': '${:,.2f}',
-        '% Meta (Leads)': '{:.0%}', '% Google (Leads)': '{:.0%}'
-    }).apply(style_tot, axis=1), use_container_width=True, height=450)
+    # Filtrar solo días con leads registrados
+    df_reales_plat = df_reales_plat[df_reales_plat['Total Leads'] > 0].copy()
+    if df_reales_plat.empty:
+        st.info("No hay datos de leads por plataforma registrados aún.")
+    else:
+        sum_cols_plat = ['Total Leads', 'Botmaker no se identifica', 'Meta', 'Landing Meta', 'Botmaker Meta', 'Google', 'Landing Google']
+        df_reales_plat = append_total_row(df_reales_plat, [], sum_cols_plat)
+        st.dataframe(df_reales_plat.style.format({
+            'cpl meta': '${:,.2f}', 'cpl google': '${:,.2f}',
+            '% Meta (Leads)': '{:.0%}', '% Google (Leads)': '{:.0%}'
+        }).apply(style_tot, axis=1), use_container_width=True, height=450)
 
     st.markdown("<div class='sub-header'>3. REALES Y CPL (Por Producto)</div>", unsafe_allow_html=True)
     df_reales_prod = df_master[['Fecha', 'Total Leads', 'Botmaker no se identifica', 'BAF', 'Landing BAF', 'Botmaker BAF', '% BAF', 'Porta', 'Landing Porta', 'Botmaker Porta', '% Porta', 'cpl baf', 'cpl porta']].copy()
-    
     df_reales_prod['cpl baf'] = df_reales_prod['cpl baf'].replace([np.inf, -np.inf], 0)
     df_reales_prod['cpl porta'] = df_reales_prod['cpl porta'].replace([np.inf, -np.inf], 0)
     
-    sum_cols_prod = ['Total Leads', 'Botmaker no se identifica', 'BAF', 'Landing BAF', 'Botmaker BAF', 'Porta', 'Landing Porta', 'Botmaker Porta']
-    df_reales_prod = append_total_row(df_reales_prod, [], sum_cols_prod, True)
-    
-    st.dataframe(df_reales_prod.style.format({
-        'cpl baf': '${:,.2f}', 'cpl porta': '${:,.2f}',
-        '% BAF': '{:.0%}', '% Porta': '{:.0%}'
-    }).apply(style_tot, axis=1), use_container_width=True, height=450)
+    # Filtrar solo días con leads registrados
+    df_reales_prod = df_reales_prod[df_reales_prod['Total Leads'] > 0].copy()
+    if df_reales_prod.empty:
+        st.info("No hay datos de leads por producto registrados aún.")
+    else:
+        sum_cols_prod = ['Total Leads', 'Botmaker no se identifica', 'BAF', 'Landing BAF', 'Botmaker BAF', 'Porta', 'Landing Porta', 'Botmaker Porta']
+        df_reales_prod = append_total_row(df_reales_prod, [], sum_cols_prod)
+        st.dataframe(df_reales_prod.style.format({
+            'cpl baf': '${:,.2f}', 'cpl porta': '${:,.2f}',
+            '% BAF': '{:.0%}', '% Porta': '{:.0%}'
+        }).apply(style_tot, axis=1), use_container_width=True, height=450)
