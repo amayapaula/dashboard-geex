@@ -304,7 +304,8 @@ def calculate_geex_metrics_final(anio, mes):
     
     col_spend_meta = 'Monto gastado (ARS)' if 'Monto gastado (ARS)' in m_ar.columns else 'Monto gastado'
     m_ar['Gasto_Clean'] = safe_numeric_spend(m_ar[col_spend_meta])
-    m_ar['Leads_Plataforma'] = pd.to_numeric(m_ar['Resultados'], errors='coerce').fillna(0) if 'Resultados' in m_ar.columns else 0
+    leads_col_meta = m_ar['Resultados'] if 'Resultados' in m_ar.columns else pd.Series(0, index=m_ar.index)
+    m_ar['Leads_Plataforma'] = pd.to_numeric(leads_col_meta, errors='coerce').fillna(0)
 
     g_ar = google_raw.copy()
     g_ar['Pais_Clean'] = g_ar['Pais'].astype(str).str.strip().str.upper()
@@ -314,7 +315,13 @@ def calculate_geex_metrics_final(anio, mes):
     
     col_spend_goog = 'Costo num' if 'Costo num' in g_ar.columns else ('Costo' if 'Costo' in g_ar.columns else 'Gasto')
     g_ar['Gasto_Clean'] = safe_numeric_spend(g_ar[col_spend_goog])
-    g_ar['Leads_Plataforma'] = pd.to_numeric(g_ar['Conversiones num'] if 'Conversiones num' in g_ar.columns else g_ar.get('Conversiones', 0), errors='coerce').fillna(0)
+    if 'Conversiones num' in g_ar.columns:
+        leads_col_goog = g_ar['Conversiones num']
+    elif 'Conversiones' in g_ar.columns:
+        leads_col_goog = g_ar['Conversiones']
+    else:
+        leads_col_goog = pd.Series(0, index=g_ar.index)
+    g_ar['Leads_Plataforma'] = pd.to_numeric(leads_col_goog, errors='coerce').fillna(0)
 
     b_all = bot_raw.copy()
     l_all = land_raw.copy()
@@ -376,7 +383,6 @@ def calculate_geex_metrics_final(anio, mes):
         leads_goog = bot_m_goog + land_m_goog
         leads_tot_reales = leads_meta + leads_goog
 
-        # Para producto: Botmaker NO ID se asume BAF para cuadrar (como en el excel)
         bot_m_baf = len(b_day[b_day['Producto_Ad'] == 'BAF'])
         land_m_baf = len(l_day[l_day['Producto'] == 'BAF'])
         leads_baf = bot_no_id + bot_m_baf + land_m_baf
@@ -451,12 +457,16 @@ with tab_historico:
     st.markdown("<div class='section-header'>Resumen Histórico Operativo (CC 6 a CC 11)</div>", unsafe_allow_html=True)
     st.info("Vista consolidada por mes con comparativa respecto al mes anterior.")
 
-    def add_comparison_arrows(data_list, num_cols, lower_is_better_cols=None):
+    def render_historic_table(data_list, num_cols, lower_is_better_cols=None):
         if lower_is_better_cols is None: lower_is_better_cols = []
         out = []
+        colors = []
+        
         for i, row in enumerate(data_list):
             new_row = {}
+            color_row = {}
             for k, v in row.items():
+                color_row[k] = ''
                 if k in num_cols:
                     is_lower_better = k in lower_is_better_cols
                     if i == 0:
@@ -464,11 +474,16 @@ with tab_historico:
                     else:
                         prev_v = data_list[i-1][k]
                         if v > prev_v:
-                            arrow = " 🔴 ↑" if is_lower_better else " 🟢 ↑"
+                            arrow = " ▲"
+                            # Si es CPL (lower is better), subir es rojo. Si es venta, subir es verde.
+                            color_row[k] = 'color: #D32F2F; font-weight: bold;' if is_lower_better else 'color: #388E3C; font-weight: bold;'
                         elif v < prev_v:
-                            arrow = " 🟢 ↓" if is_lower_better else " 🔴 ↓"
+                            arrow = " ▼"
+                            # Si es CPL (lower is better), bajar es verde. Si es venta, bajar es rojo.
+                            color_row[k] = 'color: #388E3C; font-weight: bold;' if is_lower_better else 'color: #D32F2F; font-weight: bold;'
                         else:
                             arrow = " ➖"
+                            color_row[k] = 'color: #808080;'
                     
                     if k in ["SPH Total", "SPH BAF+Porta", "SPH Mañana", "SPH Tarde"]:
                         val_str = f"{v:.2f}"
@@ -485,7 +500,15 @@ with tab_historico:
                 else:
                     new_row[k] = v
             out.append(new_row)
-        return pd.DataFrame(out)
+            colors.append(color_row)
+            
+        df_out = pd.DataFrame(out)
+        df_colors = pd.DataFrame(colors)
+        
+        def apply_colors(df):
+            return df_colors
+
+        return df_out.style.apply(apply_colors, axis=None)
 
     datos_generales_raw = [
         {"CC": 6, "Mes": "Junio", "Porta": 518, "LN": 350, "BAF": 560, "Ventas Totales": 1428, "Horas Total": 3150, "SPH Total": 0.45, "SPH BAF+Porta": 0.34, "Leads Totales": 16834, "Efectividad": 0.08, "Presupuesto Ciclo": 33831810.37, "CPL Mensual": 2009.73, "CPL Ciclo": 1638.50},
@@ -493,11 +516,11 @@ with tab_historico:
         {"CC": 8, "Mes": "Agosto", "Porta": 542, "LN": 365, "BAF": 494, "Ventas Totales": 1401, "Horas Total": 3030, "SPH Total": 0.46, "SPH BAF+Porta": 0.34, "Leads Totales": 15567, "Efectividad": 0.09, "Presupuesto Ciclo": 37593975.01, "CPL Mensual": 2414.98, "CPL Ciclo": 2673.25},
         {"CC": 9, "Mes": "Septiembre", "Porta": 511, "LN": 248, "BAF": 444, "Ventas Totales": 1203, "Horas Total": 3282, "SPH Total": 0.37, "SPH BAF+Porta": 0.29, "Leads Totales": 10866, "Efectividad": 0.11, "Presupuesto Ciclo": 37823181.54, "CPL Mensual": 3480.87, "CPL Ciclo": 2963.73},
         {"CC": 10, "Mes": "Octubre", "Porta": 366, "LN": 230, "BAF": 469, "Ventas Totales": 1065, "Horas Total": 2208, "SPH Total": 0.48, "SPH BAF+Porta": 0.38, "Leads Totales": 12412, "Efectividad": 0.09, "Presupuesto Ciclo": 29823696.35, "CPL Mensual": 2402.81, "CPL Ciclo": 2606.97},
-        {"CC": 11, "Mes": "Noviembre", "Porta": 29, "LN": 20, "BAF": 37, "Ventas Totales": 86, "Horas Total": 216, "SPH Total": 0.40, "SPH BAF+Porta": 0.31, "Leads Totales": 1382, "Efectividad": 0.06, "Presupuesto Ciclo": 457590.32, "CPL Mensual": 331.11, "CPL Ciclo": 227.09}
+        {"CC": 11, "Mes": "Noviembre", "Porta": 48, "LN": 27, "BAF": 55, "Ventas Totales": 130, "Horas Total": 312, "SPH Total": 0.42, "SPH BAF+Porta": 0.33, "Leads Totales": 1806, "Efectividad": 0.07, "Presupuesto Ciclo": 2851993.96, "CPL Mensual": 1579.18, "CPL Ciclo": 1137.61}
     ]
     cols_gen = ["Porta", "LN", "BAF", "Ventas Totales", "Horas Total", "SPH Total", "SPH BAF+Porta", "Leads Totales", "Efectividad", "Presupuesto Ciclo", "CPL Mensual", "CPL Ciclo"]
-    df_gen_show = add_comparison_arrows(datos_generales_raw, cols_gen, ["CPL Mensual", "CPL Ciclo"])
-    st.dataframe(df_gen_show, use_container_width=True, hide_index=True)
+    styled_gen_df = render_historic_table(datos_generales_raw, cols_gen, ["CPL Mensual", "CPL Ciclo"])
+    st.dataframe(styled_gen_df, use_container_width=True, hide_index=True)
 
     st.markdown("<div class='section-header'>Desglose Histórico por Turnos (Mañana vs Tarde)</div>", unsafe_allow_html=True)
     sub_m, sub_t = st.tabs(["Turno Mañana (Yamil)", "Turno Tarde (Soledad)"])
@@ -512,7 +535,7 @@ with tab_historico:
             {"CC": 11, "Mes": "Noviembre", "Horas Mañana": 144, "Porta": 17, "LN": 11, "BAF": 20, "Total Yamil": 48, "SPH Mañana": 0.33, "SPH BAF+Porta": 0.26}
         ]
         cols_m = ["Horas Mañana", "Porta", "LN", "BAF", "Total Yamil", "SPH Mañana", "SPH BAF+Porta"]
-        st.dataframe(add_comparison_arrows(datos_manana_raw, cols_m), use_container_width=True, hide_index=True)
+        st.dataframe(render_historic_table(datos_manana_raw, cols_m), use_container_width=True, hide_index=True)
 
     with sub_t:
         datos_tarde_raw = [
@@ -524,7 +547,7 @@ with tab_historico:
             {"CC": 11, "Mes": "Noviembre", "Horas Tarde": 72, "Porta": 12, "LN": 9, "BAF": 17, "Total Tarde": 38, "SPH Tarde": 0.53, "SPH BAF+Porta": 0.40}
         ]
         cols_t = ["Horas Tarde", "Porta", "LN", "BAF", "Total Tarde", "SPH Tarde", "SPH BAF+Porta"]
-        st.dataframe(add_comparison_arrows(datos_tarde_raw, cols_t), use_container_width=True, hide_index=True)
+        st.dataframe(render_historic_table(datos_tarde_raw, cols_t), use_container_width=True, hide_index=True)
 
 # --- 2. PESTAÑA PRODUCTIVIDAD ---
 with tab_prod:
@@ -904,7 +927,6 @@ with tab_presupuesto:
             if c in money_cols or c in sum_cols:
                 total_row[c] = df[c].sum()
         
-        # Recalcular porcentajes del total para tabla de Plataforma
         if 'Meta ($)' in df.columns:
             tot_pres = total_row.get('Total ($)', 0)
             total_row['% Meta'] = total_row.get('Meta ($)', 0) / tot_pres if tot_pres > 0 else 0
@@ -912,12 +934,10 @@ with tab_presupuesto:
             total_row['% Baf'] = total_row.get('Baf ($)', 0) / tot_pres if tot_pres > 0 else 0
             total_row['% Porta'] = total_row.get('Porta ($)', 0) / tot_pres if tot_pres > 0 else 0
             
-        # Recalcular CPL para Leads
         if 'Diferencia' in df.columns:
             total_row['Diferencia'] = (total_row.get('Reales (Leads)', 0) / total_row.get('Plataforma (Leads)', 1) - 1) if total_row.get('Plataforma (Leads)', 1) > 0 else 0
             total_row['CPL'] = df_master['Total ($)'].sum() / total_row.get('Reales (Leads)', 1) if total_row.get('Reales (Leads)', 1) > 0 else 0
 
-        # Recalcular % para tabla REALES por Plataforma
         if 'Botmaker Meta' in df.columns and 'BAF' not in df.columns:
             tot_l = total_row.get('Total Reales', 0)
             total_row['% Meta (L)'] = total_row.get('Meta', 0) / tot_l if tot_l > 0 else 0
@@ -925,7 +945,6 @@ with tab_presupuesto:
             total_row['cpl meta'] = df_master['Meta ($)'].sum() / total_row.get('Meta', 1) if total_row.get('Meta', 1) > 0 else 0
             total_row['cpl google'] = df_master['Google ($)'].sum() / total_row.get('Google', 1) if total_row.get('Google', 1) > 0 else 0
 
-        # Recalcular % para tabla REALES por Producto
         if 'BAF' in df.columns:
             tot_l = total_row.get('Total Reales', 0)
             total_row['% BAF'] = total_row.get('BAF', 0) / tot_l if tot_l > 0 else 0
@@ -938,7 +957,6 @@ with tab_presupuesto:
     def style_tot(row):
         return ['background-color: #E8F8F5; font-weight: bold;' if row['Fecha'] == 'TOTAL' else ''] * len(row)
 
-    # 1. PRESUPUESTO PLATAFORMA (Y PRODUCTO)
     st.markdown("<div class='sub-header'>1. PRESUPUESTO PLATAFORMA Y PRODUCTO</div>", unsafe_allow_html=True)
     df_gastos = df_master[['Fecha', 'Total ($)', 'Meta ($)', '% Meta', 'Google ($)', '% Google', 'Baf ($)', '% Baf', 'Porta ($)', '% Porta']].copy()
     df_gastos = df_gastos[(df_gastos['Total ($)'] > 0) | (df_gastos['Meta ($)'] > 0) | (df_gastos['Google ($)'] > 0)].copy()
@@ -952,7 +970,6 @@ with tab_presupuesto:
             '% Meta': '{:.0%}', '% Google': '{:.0%}', '% Baf': '{:.0%}', '% Porta': '{:.0%}'
         }).apply(style_tot, axis=1), use_container_width=True, height=450)
 
-    # 2. LEADS
     st.markdown("<div class='sub-header'>2. LEADS Y CPL</div>", unsafe_allow_html=True)
     df_leads_cpl = df_master[['Fecha', 'Plataforma (Leads)', 'Reales (Leads)', 'Diferencia', 'CPL']].copy()
     df_leads_cpl = df_leads_cpl[df_leads_cpl['Reales (Leads)'] > 0].copy()
@@ -965,7 +982,6 @@ with tab_presupuesto:
             'Diferencia': '{:.0%}', 'CPL': '${:,.2f}'
         }).apply(style_tot, axis=1), use_container_width=True, height=450)
 
-    # 3. REALES (Por Plataforma)
     st.markdown("<div class='sub-header'>3. REALES (Por Plataforma)</div>", unsafe_allow_html=True)
     df_r_plat = df_master[['Fecha', 'Reales (Leads)', 'Botmaker no se identifica', 'Meta', 'Landing Meta', 'Botmaker Meta', '% Meta (L)', 'Google', 'Landing Google', 'Botmaker Google', '% Google (L)', 'cpl meta', 'cpl google']].copy()
     df_r_plat.rename(columns={'Reales (Leads)': 'Total Reales'}, inplace=True)
@@ -981,7 +997,6 @@ with tab_presupuesto:
             '% Meta (L)': '{:.0%}', '% Google (L)': '{:.0%}'
         }).apply(style_tot, axis=1), use_container_width=True, height=450)
 
-    # 4. REALES (Por Producto)
     st.markdown("<div class='sub-header'>4. REALES (Por Producto)</div>", unsafe_allow_html=True)
     df_r_prod = df_master[['Fecha', 'Reales (Leads)', 'Botmaker no se identifica', 'BAF', 'Landing BAF', 'Botmaker BAF', '% BAF', 'Porta', 'Landing Porta', 'Botmaker Porta', '% Porta', 'cpl baf', 'cpl porta']].copy()
     df_r_prod.rename(columns={'Reales (Leads)': 'Total Reales'}, inplace=True)
