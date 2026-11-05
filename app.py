@@ -51,6 +51,22 @@ with col_filtro:
     mes_seleccionado = st.selectbox("Mes", list(meses_disponibles.keys()), label_visibility="collapsed")
     anio_sel, mes_sel = meses_disponibles[mes_seleccionado]
 
+# Helper para conversión limpia de montos de dinero
+def safe_numeric_spend(series):
+    def parse_val(v):
+        try:
+            if pd.isna(v): return 0.0
+            if isinstance(v, (int, float)): return float(v)
+            v_str = str(v).replace('$', '').strip()
+            if '.' in v_str and ',' in v_str:
+                v_str = v_str.replace('.', '').replace(',', '.')
+            elif ',' in v_str:
+                v_str = v_str.replace(',', '.')
+            return float(v_str)
+        except:
+            return 0.0
+    return series.apply(parse_val)
+
 # ==========================================
 # 2. CARGA DE DATOS
 # ==========================================
@@ -280,12 +296,25 @@ def calculate_geex_metrics_final(anio, mes):
     # ==========================================
     # --- PRESUPUESTO DIARIO, REALES Y CPL ---
     # ==========================================
-    m_ar = meta_raw[meta_raw['Pais'].astype(str).str.strip().str.upper() == 'AR'].copy()
+    # Filtro flexible para Meta Argentina
+    m_ar = meta_raw.copy()
+    m_ar['Pais_Clean'] = m_ar['Pais'].astype(str).str.strip().str.upper()
+    m_ar = m_ar[m_ar['Pais_Clean'].str.startswith('AR')].copy()
+    m_ar['Fecha_Clean'] = pd.to_datetime(m_ar['Día'], errors='coerce').dt.date
     m_ar['Prod_Clean'] = m_ar['Producto'].astype(str).str.strip().str.upper()
+    
+    col_spend_meta = 'Monto gastado (ARS)' if 'Monto gastado (ARS)' in m_ar.columns else 'Monto gastado'
+    m_ar['Gasto_Clean'] = safe_numeric_spend(m_ar[col_spend_meta])
 
-    g_ar = google_raw[google_raw['Pais'].astype(str).str.strip().str.upper() == 'AR'].copy()
+    # Filtro flexible para Google Argentina
+    g_ar = google_raw.copy()
+    g_ar['Pais_Clean'] = g_ar['Pais'].astype(str).str.strip().str.upper()
+    g_ar = g_ar[g_ar['Pais_Clean'].str.startswith('AR')].copy()
+    g_ar['Fecha_Clean'] = pd.to_datetime(g_ar['Día'], errors='coerce').dt.date
     g_ar['Prod_Clean'] = g_ar['Producto'].astype(str).str.strip().str.upper()
-    g_ar['Costo_Final'] = g_ar['Costo num'] if 'Costo num' in g_ar.columns else g_ar['Costo']
+    
+    col_spend_goog = 'Costo num' if 'Costo num' in g_ar.columns else ('Costo' if 'Costo' in g_ar.columns else 'Gasto')
+    g_ar['Gasto_Clean'] = safe_numeric_spend(g_ar[col_spend_goog])
 
     b_all = bot_raw.copy()
     l_all = land_raw.copy()
@@ -302,7 +331,7 @@ def calculate_geex_metrics_final(anio, mes):
     b_all['Plataforma'] = b_all['Plataforma'].astype(str).str.strip().str.upper()
     b_all['Producto'] = b_all['Producto'].astype(str).str.strip().str.upper()
 
-    # Fechas de facturación exactas según mes
+    # Rango de facturación según mes
     if mes == 10:
         start_d = pd.Timestamp('2026-10-01')
         end_d = pd.Timestamp('2026-10-31')
@@ -319,30 +348,15 @@ def calculate_geex_metrics_final(anio, mes):
     for d in dates_presupuesto:
         d_val = d.date()
         
-        if mes == 10:
-            in_meta = pd.Timestamp('2026-10-02') <= d <= pd.Timestamp('2026-10-28')
-            in_goog = pd.Timestamp('2026-10-01') <= d <= pd.Timestamp('2026-10-31')
-        elif mes == 11:
-            in_meta = pd.Timestamp('2026-10-29') <= d <= pd.Timestamp('2026-11-26')
-            in_goog = pd.Timestamp('2026-11-01') <= d <= pd.Timestamp('2026-11-26')
-        else:
-            in_meta = True; in_goog = True
-
-        if in_meta:
-            m_day = m_ar[m_ar['Día'].dt.date == d_val]
-            p_meta = m_day['Monto gastado (ARS)'].sum()
-            p_m_baf = m_day[m_day['Prod_Clean'] == 'BAF']['Monto gastado (ARS)'].sum()
-            p_m_porta = m_day[m_day['Prod_Clean'] == 'PORTA']['Monto gastado (ARS)'].sum()
-        else:
-            p_meta = p_m_baf = p_m_porta = 0
+        m_day = m_ar[m_ar['Fecha_Clean'] == d_val]
+        p_meta = m_day['Gasto_Clean'].sum()
+        p_m_baf = m_day[m_day['Prod_Clean'].str.contains('BAF')]['Gasto_Clean'].sum()
+        p_m_porta = m_day[m_day['Prod_Clean'].str.contains('PORTA')]['Gasto_Clean'].sum()
             
-        if in_goog:
-            g_day = g_ar[g_ar['Día'].dt.date == d_val]
-            p_goog = g_day['Costo_Final'].sum()
-            p_g_baf = g_day[g_day['Prod_Clean'] == 'BAF']['Costo_Final'].sum()
-            p_g_porta = g_day[g_day['Prod_Clean'] == 'PORTA']['Costo_Final'].sum()
-        else:
-            p_goog = p_g_baf = p_g_porta = 0
+        g_day = g_ar[g_ar['Fecha_Clean'] == d_val]
+        p_goog = g_day['Gasto_Clean'].sum()
+        p_g_baf = g_day[g_day['Prod_Clean'].str.contains('BAF')]['Gasto_Clean'].sum()
+        p_g_porta = g_day[g_day['Prod_Clean'].str.contains('PORTA')]['Gasto_Clean'].sum()
 
         tot_pres = p_meta + p_goog
         p_baf = p_m_baf + p_g_baf
@@ -420,12 +434,11 @@ tab_historico, tab_prod, tab_asesores, tab_datos, tab_efectividad, tab_presupues
     "Resumen Histórico", "Productividad", "Asesores", "Datos", "Efectividad", "Presupuesto"
 ])
 
-# --- 1. PESTAÑA HISTÓRICO (Con flechas comparativas respecto al mes anterior) ---
+# --- 1. PESTAÑA HISTÓRICO ---
 with tab_historico:
     st.markdown("<div class='section-header'>Resumen Histórico Operativo (CC 6 a CC 11)</div>", unsafe_allow_html=True)
     st.info("Vista consolidada por mes con comparativa respecto al mes anterior.")
 
-    # Función para agregar flechas comparativas
     def add_comparison_arrows(data_list, num_cols, lower_is_better_cols=None):
         if lower_is_better_cols is None: lower_is_better_cols = []
         out = []
@@ -911,8 +924,8 @@ with tab_presupuesto:
 
     st.markdown("<div class='sub-header'>1. PRESUPUESTO PLATAFORMA Y PRODUCTO</div>", unsafe_allow_html=True)
     df_gastos = df_master[['Fecha', 'Total ($)', 'Meta ($)', '% Meta ($)', 'Google ($)', '% Google ($)', 'Baf ($)', '% Baf ($)', 'Porta ($)', '% Porta ($)']].copy()
-    # Filtrar solo días con presupuesto o datos
-    df_gastos = df_gastos[df_gastos['Total ($)'] > 0].copy()
+    df_gastos = df_gastos[(df_gastos['Total ($)'] > 0) | (df_gastos['Meta ($)'] > 0) | (df_gastos['Google ($)'] > 0)].copy()
+    
     if df_gastos.empty:
         st.info("No hay datos de presupuesto registrados aún para el período seleccionado.")
     else:
@@ -923,35 +936,35 @@ with tab_presupuesto:
         }).apply(style_tot, axis=1), use_container_width=True, height=450)
 
     st.markdown("<div class='sub-header'>2. REALES Y CPL (Por Plataforma)</div>", unsafe_allow_html=True)
-    df_reales_plat = df_master[['Fecha', 'Total Leads', 'Botmaker no se identifica', 'Meta', 'Landing Meta', 'Botmaker Meta', '% Meta (Leads)', 'Google', 'Landing Google', '% Google (Leads)', 'cpl meta', 'cpl google']].copy()
+    df_reales_plat = df_master[['Fecha', 'Total Leads', 'Botmaker no se identifica', 'Meta', 'Landing Meta', 'Botmaker Meta', '% Meta (Leads)', 'Google', 'Landing Google', '% Google (Leads)', 'cpl meta', 'cpl google', 'Meta ($)', 'Google ($)']].copy()
     df_reales_plat['cpl meta'] = df_reales_plat['cpl meta'].replace([np.inf, -np.inf], 0)
     df_reales_plat['cpl google'] = df_reales_plat['cpl google'].replace([np.inf, -np.inf], 0)
     
-    # Filtrar solo días con leads registrados
-    df_reales_plat = df_reales_plat[df_reales_plat['Total Leads'] > 0].copy()
+    df_reales_plat = df_reales_plat[(df_reales_plat['Total Leads'] > 0) | (df_reales_plat['Meta ($)'] > 0) | (df_reales_plat['Google ($)'] > 0)].copy()
     if df_reales_plat.empty:
         st.info("No hay datos de leads por plataforma registrados aún.")
     else:
         sum_cols_plat = ['Total Leads', 'Botmaker no se identifica', 'Meta', 'Landing Meta', 'Botmaker Meta', 'Google', 'Landing Google']
-        df_reales_plat = append_total_row(df_reales_plat, [], sum_cols_plat)
-        st.dataframe(df_reales_plat.style.format({
+        df_show_plat = df_reales_plat.drop(columns=['Meta ($)', 'Google ($)'])
+        df_show_plat = append_total_row(df_show_plat, [], sum_cols_plat)
+        st.dataframe(df_show_plat.style.format({
             'cpl meta': '${:,.2f}', 'cpl google': '${:,.2f}',
             '% Meta (Leads)': '{:.0%}', '% Google (Leads)': '{:.0%}'
         }).apply(style_tot, axis=1), use_container_width=True, height=450)
 
     st.markdown("<div class='sub-header'>3. REALES Y CPL (Por Producto)</div>", unsafe_allow_html=True)
-    df_reales_prod = df_master[['Fecha', 'Total Leads', 'Botmaker no se identifica', 'BAF', 'Landing BAF', 'Botmaker BAF', '% BAF', 'Porta', 'Landing Porta', 'Botmaker Porta', '% Porta', 'cpl baf', 'cpl porta']].copy()
+    df_reales_prod = df_master[['Fecha', 'Total Leads', 'Botmaker no se identifica', 'BAF', 'Landing BAF', 'Botmaker BAF', '% BAF', 'Porta', 'Landing Porta', 'Botmaker Porta', '% Porta', 'cpl baf', 'cpl porta', 'Baf ($)', 'Porta ($)']].copy()
     df_reales_prod['cpl baf'] = df_reales_prod['cpl baf'].replace([np.inf, -np.inf], 0)
     df_reales_prod['cpl porta'] = df_reales_prod['cpl porta'].replace([np.inf, -np.inf], 0)
     
-    # Filtrar solo días con leads registrados
-    df_reales_prod = df_reales_prod[df_reales_prod['Total Leads'] > 0].copy()
+    df_reales_prod = df_reales_prod[(df_reales_prod['Total Leads'] > 0) | (df_reales_prod['Baf ($)'] > 0) | (df_reales_prod['Porta ($)'] > 0)].copy()
     if df_reales_prod.empty:
         st.info("No hay datos de leads por producto registrados aún.")
     else:
         sum_cols_prod = ['Total Leads', 'Botmaker no se identifica', 'BAF', 'Landing BAF', 'Botmaker BAF', 'Porta', 'Landing Porta', 'Botmaker Porta']
-        df_reales_prod = append_total_row(df_reales_prod, [], sum_cols_prod)
-        st.dataframe(df_reales_prod.style.format({
+        df_show_prod = df_reales_prod.drop(columns=['Baf ($)', 'Porta ($)'])
+        df_show_prod = append_total_row(df_show_prod, [], sum_cols_prod)
+        st.dataframe(df_show_prod.style.format({
             'cpl baf': '${:,.2f}', 'cpl porta': '${:,.2f}',
             '% BAF': '{:.0%}', '% Porta': '{:.0%}'
         }).apply(style_tot, axis=1), use_container_width=True, height=450)
