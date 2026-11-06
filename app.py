@@ -298,9 +298,10 @@ def calculate_geex_metrics_final(anio, mes):
     # ==========================================
     m_ar = meta_raw.copy()
     m_ar['Pais_Clean'] = m_ar['Pais'].astype(str).str.strip().str.upper()
-    m_ar = m_ar[m_ar['Pais_Clean'].str.startswith('AR')].copy()
+    m_ar = m_ar[m_ar['Pais_Clean'] == 'AR'].copy()
     m_ar['Fecha_Clean'] = pd.to_datetime(m_ar['Día'], errors='coerce').dt.date
     m_ar['Prod_Clean'] = m_ar['Producto'].astype(str).str.strip().str.upper()
+    m_ar = m_ar[m_ar['Prod_Clean'] != 'OTRO'].copy()  # igual que presu paula: se excluye producto OTRO
     
     col_spend_meta = 'Monto gastado (ARS)' if 'Monto gastado (ARS)' in m_ar.columns else 'Monto gastado'
     m_ar['Gasto_Clean'] = safe_numeric_spend(m_ar[col_spend_meta])
@@ -309,9 +310,10 @@ def calculate_geex_metrics_final(anio, mes):
 
     g_ar = google_raw.copy()
     g_ar['Pais_Clean'] = g_ar['Pais'].astype(str).str.strip().str.upper()
-    g_ar = g_ar[g_ar['Pais_Clean'].str.startswith('AR')].copy()
+    g_ar = g_ar[g_ar['Pais_Clean'] == 'AR'].copy()
     g_ar['Fecha_Clean'] = pd.to_datetime(g_ar['Día'], errors='coerce').dt.date
     g_ar['Prod_Clean'] = g_ar['Producto'].astype(str).str.strip().str.upper()
+    g_ar = g_ar[g_ar['Prod_Clean'] != 'OTRO'].copy()
     
     col_spend_goog = 'Costo num' if 'Costo num' in g_ar.columns else ('Costo' if 'Costo' in g_ar.columns else 'Gasto')
     g_ar['Gasto_Clean'] = safe_numeric_spend(g_ar[col_spend_goog])
@@ -323,13 +325,13 @@ def calculate_geex_metrics_final(anio, mes):
         leads_col_goog = pd.Series(0, index=g_ar.index)
     g_ar['Leads_Plataforma'] = pd.to_numeric(leads_col_goog, errors='coerce').fillna(0)
 
-    b_all = bot_raw.copy()
-    l_all = land_raw.copy()
+    b_all = bot_raw[bot_raw['PAIS'].astype(str).str.strip().str.upper() == 'AR'].copy()   # solo Argentina
+    l_all = land_raw[land_raw['Pais'].astype(str).str.strip().str.upper() == 'AR'].copy()  # solo Argentina
     bot_an_copy = bot_an_raw.copy()
     
     b_all['join_num'] = b_all['Id Contacto/Número'].astype(str).str.replace(r'\.0$', '', regex=True).str[-10:]
     bot_an_copy['join_num'] = bot_an_copy['NIM'].astype(str).str.replace(r'\.0$', '', regex=True).str[-10:]
-    bot_an_clean_pres = bot_an_copy.dropna(subset=['Anuncio_Titulo']).drop_duplicates(subset=['join_num'], keep='last')
+    bot_an_clean_pres = bot_an_copy.drop_duplicates(subset=['join_num'], keep='first')  # igual que el BUSCARV de presu paula (primera coincidencia)
     b_all = b_all.merge(bot_an_clean_pres[['join_num', 'Plataforma', 'Producto']], on='join_num', how='left')
 
     l_all['Plataforma'] = l_all['Plataforma'].astype(str).str.strip().str.upper()
@@ -355,14 +357,14 @@ def calculate_geex_metrics_final(anio, mes):
         
         m_day = m_ar[m_ar['Fecha_Clean'] == d_val]
         p_meta = m_day['Gasto_Clean'].sum()
-        p_m_baf = m_day[m_day['Prod_Clean'].str.contains('BAF')]['Gasto_Clean'].sum()
-        p_m_porta = m_day[m_day['Prod_Clean'].str.contains('PORTA')]['Gasto_Clean'].sum()
+        p_m_baf = m_day[m_day['Prod_Clean'] == 'BAF']['Gasto_Clean'].sum()
+        p_m_porta = m_day[m_day['Prod_Clean'] == 'PORTA']['Gasto_Clean'].sum()
         leads_plat_meta = m_day['Leads_Plataforma'].sum()
             
         g_day = g_ar[g_ar['Fecha_Clean'] == d_val]
         p_goog = g_day['Gasto_Clean'].sum()
-        p_g_baf = g_day[g_day['Prod_Clean'].str.contains('BAF')]['Gasto_Clean'].sum()
-        p_g_porta = g_day[g_day['Prod_Clean'].str.contains('PORTA')]['Gasto_Clean'].sum()
+        p_g_baf = g_day[g_day['Prod_Clean'] == 'BAF']['Gasto_Clean'].sum()
+        p_g_porta = g_day[g_day['Prod_Clean'] == 'PORTA']['Gasto_Clean'].sum()
         leads_plat_goog = g_day['Leads_Plataforma'].sum()
 
         tot_pres = p_meta + p_goog
@@ -373,7 +375,8 @@ def calculate_geex_metrics_final(anio, mes):
         b_day = b_all[pd.to_datetime(b_all['Fecha Sesión'], dayfirst=True, errors='coerce').dt.date == d_val]
         l_day = l_all[pd.to_datetime(l_all['Fecha Ingreso'], dayfirst=True, errors='coerce').dt.date == d_val]
 
-        bot_no_id = b_day['Plataforma'].isin(['NAN', 'NONE', '']).sum() + b_day['Plataforma'].isna().sum()
+        bot_no_id = (b_day['Plataforma'] == 'NO SE IDENTIFICA').sum()
+        bot_no_id_prod = (b_day['Producto_Ad'] == 'NO SE IDENTIFICA').sum()
         bot_m_meta = len(b_day[b_day['Plataforma'] == 'META'])
         land_m_meta = len(l_day[l_day['Plataforma'] == 'META'])
         bot_m_goog = len(b_day[b_day['Plataforma'] == 'GOOGLE'])
@@ -385,7 +388,7 @@ def calculate_geex_metrics_final(anio, mes):
 
         bot_m_baf = len(b_day[b_day['Producto_Ad'] == 'BAF'])
         land_m_baf = len(l_day[l_day['Producto'] == 'BAF'])
-        leads_baf = bot_no_id + bot_m_baf + land_m_baf
+        leads_baf = bot_no_id_prod + bot_m_baf + land_m_baf
         
         bot_m_porta = len(b_day[b_day['Producto_Ad'] == 'PORTA'])
         land_m_porta = len(l_day[l_day['Producto'] == 'PORTA'])
