@@ -2,6 +2,7 @@ import os
 import streamlit as st
 import pandas as pd
 import numpy as np
+import datetime
 
 # ==========================================
 # 1. CONFIGURACIÓN INICIAL Y DISEÑO GEEX
@@ -301,7 +302,7 @@ def calculate_geex_metrics_final(anio, mes):
     m_ar = m_ar[m_ar['Pais_Clean'] == 'AR'].copy()
     m_ar['Fecha_Clean'] = pd.to_datetime(m_ar['Día'], errors='coerce').dt.date
     m_ar['Prod_Clean'] = m_ar['Producto'].astype(str).str.strip().str.upper()
-    m_ar = m_ar[m_ar['Prod_Clean'] != 'OTRO'].copy()  # igual que presu paula: se excluye producto OTRO
+    m_ar = m_ar[m_ar['Prod_Clean'] != 'OTRO'].copy()
     
     col_spend_meta = 'Monto gastado (ARS)' if 'Monto gastado (ARS)' in m_ar.columns else 'Monto gastado'
     m_ar['Gasto_Clean'] = safe_numeric_spend(m_ar[col_spend_meta])
@@ -325,13 +326,13 @@ def calculate_geex_metrics_final(anio, mes):
         leads_col_goog = pd.Series(0, index=g_ar.index)
     g_ar['Leads_Plataforma'] = pd.to_numeric(leads_col_goog, errors='coerce').fillna(0)
 
-    b_all = bot_raw[bot_raw['PAIS'].astype(str).str.strip().str.upper() == 'AR'].copy()   # solo Argentina
-    l_all = land_raw[land_raw['Pais'].astype(str).str.strip().str.upper() == 'AR'].copy()  # solo Argentina
+    b_all = bot_raw[bot_raw['PAIS'].astype(str).str.strip().str.upper() == 'AR'].copy()
+    l_all = land_raw[land_raw['Pais'].astype(str).str.strip().str.upper() == 'AR'].copy()
     bot_an_copy = bot_an_raw.copy()
     
     b_all['join_num'] = b_all['Id Contacto/Número'].astype(str).str.replace(r'\.0$', '', regex=True).str[-10:]
     bot_an_copy['join_num'] = bot_an_copy['NIM'].astype(str).str.replace(r'\.0$', '', regex=True).str[-10:]
-    bot_an_clean_pres = bot_an_copy.drop_duplicates(subset=['join_num'], keep='first')  # igual que el BUSCARV de presu paula (primera coincidencia)
+    bot_an_clean_pres = bot_an_copy.drop_duplicates(subset=['join_num'], keep='first')
     b_all = b_all.merge(bot_an_clean_pres[['join_num', 'Plataforma', 'Producto']], on='join_num', how='left')
 
     l_all['Plataforma'] = l_all['Plataforma'].astype(str).str.strip().str.upper()
@@ -339,16 +340,27 @@ def calculate_geex_metrics_final(anio, mes):
     b_all['Plataforma'] = b_all['Plataforma'].astype(str).str.strip().str.upper()
     b_all['Producto_Ad'] = b_all['Producto'].astype(str).str.strip().str.upper()
 
+    # Obtener fechas del mes de las exportaciones publicitarias
     all_dates_meta = m_ar[pd.to_datetime(m_ar['Fecha_Clean']).dt.month == mes]['Fecha_Clean'].unique()
     all_dates_goog = g_ar[pd.to_datetime(g_ar['Fecha_Clean']).dt.month == mes]['Fecha_Clean'].unique()
     all_valid_dates = sorted(list(set(list(all_dates_meta) + list(all_dates_goog))))
     
+    start_d = pd.Timestamp(year=anio, month=mes, day=1)
+    hoy = datetime.date.today()
+    
     if not all_valid_dates:
-        start_d = pd.Timestamp(year=anio, month=mes, day=1)
-        end_d = start_d + pd.offsets.MonthEnd(1)
-        dates_presupuesto = pd.date_range(start_d, end_d)
+        if hoy.year == anio and hoy.month == mes:
+            end_d = hoy
+        else:
+            end_d = start_d + pd.offsets.MonthEnd(1)
     else:
-        dates_presupuesto = pd.to_datetime(all_valid_dates)
+        max_date = pd.to_datetime(max(all_valid_dates)).date()
+        if hoy.year == anio and hoy.month == mes and hoy > max_date:
+            end_d = hoy
+        else:
+            end_d = max_date
+            
+    dates_presupuesto = pd.date_range(start=start_d, end=end_d)
 
     pres_rows = []
     
@@ -961,7 +973,6 @@ with tab_presupuesto:
 
     st.markdown("<div class='sub-header'>1. PRESUPUESTO PLATAFORMA Y PRODUCTO</div>", unsafe_allow_html=True)
     df_gastos = df_master[['Fecha', 'Total ($)', 'Meta ($)', '% Meta', 'Google ($)', '% Google', 'Baf ($)', '% Baf', 'Porta ($)', '% Porta']].copy()
-    df_gastos = df_gastos[(df_gastos['Total ($)'] > 0) | (df_gastos['Meta ($)'] > 0) | (df_gastos['Google ($)'] > 0)].copy()
     
     if df_gastos.empty:
         st.info("No hay datos de presupuesto registrados aún para el período seleccionado.")
@@ -974,7 +985,6 @@ with tab_presupuesto:
 
     st.markdown("<div class='sub-header'>2. LEADS Y CPL</div>", unsafe_allow_html=True)
     df_leads_cpl = df_master[['Fecha', 'Plataforma (Leads)', 'Reales (Leads)', 'Diferencia', 'CPL']].copy()
-    df_leads_cpl = df_leads_cpl[df_leads_cpl['Reales (Leads)'] > 0].copy()
     
     if df_leads_cpl.empty:
         st.info("No hay leads registrados.")
@@ -987,7 +997,6 @@ with tab_presupuesto:
     st.markdown("<div class='sub-header'>3. REALES (Por Plataforma)</div>", unsafe_allow_html=True)
     df_r_plat = df_master[['Fecha', 'Reales (Leads)', 'Botmaker no se identifica', 'Meta', 'Landing Meta', 'Botmaker Meta', '% Meta (L)', 'Google', 'Landing Google', 'Botmaker Google', '% Google (L)', 'cpl meta', 'cpl google']].copy()
     df_r_plat.rename(columns={'Reales (Leads)': 'Total Reales'}, inplace=True)
-    df_r_plat = df_r_plat[df_r_plat['Total Reales'] > 0].copy()
     
     if df_r_plat.empty:
         st.info("No hay leads reales registrados.")
@@ -1002,7 +1011,6 @@ with tab_presupuesto:
     st.markdown("<div class='sub-header'>4. REALES (Por Producto)</div>", unsafe_allow_html=True)
     df_r_prod = df_master[['Fecha', 'Reales (Leads)', 'Botmaker no se identifica', 'BAF', 'Landing BAF', 'Botmaker BAF', '% BAF', 'Porta', 'Landing Porta', 'Botmaker Porta', '% Porta', 'cpl baf', 'cpl porta']].copy()
     df_r_prod.rename(columns={'Reales (Leads)': 'Total Reales'}, inplace=True)
-    df_r_prod = df_r_prod[df_r_prod['Total Reales'] > 0].copy()
     
     if df_r_prod.empty:
         st.info("No hay leads reales registrados.")

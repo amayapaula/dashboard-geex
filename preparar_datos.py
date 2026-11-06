@@ -20,6 +20,18 @@ TABLAS = {
     "google":   ("RAW_google", ["Pais", "Día", "Producto", "Costo num"], "Día", False),
 }
 
+def parse_fecha(serie):
+    """Fechas ISO (AAAA-MM-DD, como las de Meta) se leen tal cual; el resto como DD/MM/AAAA.
+    Con dayfirst=True las ISO se daban vuelta (2026-10-11 pasaba a 10/11)."""
+    if pd.api.types.is_datetime64_any_dtype(serie):
+        return serie
+    t = serie.astype("string").str.strip()
+    es_iso = t.str.match(r"^\d{4}-\d{2}-\d{2}").fillna(False).astype(bool)
+    out = pd.Series(pd.NaT, index=serie.index, dtype="datetime64[ns]")
+    out[es_iso] = pd.to_datetime(t[es_iso].str[:10], format="%Y-%m-%d", errors="coerce")
+    out[~es_iso] = pd.to_datetime(t[~es_iso], dayfirst=True, errors="coerce")
+    return out
+
 def codigo_telefono(serie):
     num = serie.astype(str).str.replace(r"\.0$", "", regex=True).str.replace(r"\D", "", regex=True).str[-10:]
     return num.map(lambda n: hashlib.sha256((SAL + n).encode()).hexdigest()[:16] if n else "")
@@ -34,7 +46,7 @@ def main():
         if solo_digital:
             df = df[df["Supervisor"].isin(SUPERVISORES_DIGITAL)]
         if col_fecha:
-            df["Fecha"] = pd.to_datetime(df[col_fecha], dayfirst=True, errors="coerce")
+            df["Fecha"] = parse_fecha(df[col_fecha])
             if col_fecha != "Fecha":
                 df = df.drop(columns=[col_fecha])
         for c in ("Id Contacto/Número", "NIM"):
