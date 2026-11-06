@@ -1,8 +1,8 @@
 import os
+import datetime
 import streamlit as st
 import pandas as pd
 import numpy as np
-import datetime
 
 # ==========================================
 # 1. CONFIGURACIÓN INICIAL Y DISEÑO GEEX
@@ -68,6 +68,17 @@ def safe_numeric_spend(series):
             return 0.0
     return series.apply(parse_val)
 
+def clean_dates_series(series):
+    if series is None or len(series) == 0:
+        return pd.Series(dtype='datetime64[ns]')
+    try:
+        parsed = pd.to_datetime(series, format='mixed', dayfirst=True, errors='coerce')
+    except Exception:
+        parsed = pd.to_datetime(series, dayfirst=True, errors='coerce')
+    if hasattr(parsed.dt, 'tz') and parsed.dt.tz is not None:
+        parsed = parsed.dt.tz_localize(None)
+    return parsed
+
 # ==========================================
 # 2. CARGA DE DATOS
 # ==========================================
@@ -84,18 +95,6 @@ def load_raw_data_final():
         landing = pd.read_parquet(os.path.join(carpeta, "landing.parquet"))
         meta_df = pd.read_parquet(os.path.join(carpeta, "meta.parquet"))
         google_df = pd.read_parquet(os.path.join(carpeta, "google.parquet"))
-        
-        porta['Fecha'] = porta['Fecha']
-        porta['Fecha inicio'] = porta['Fecha']
-        ln['Fecha'] = ln['Fecha']
-        ln['Fecha Inicio'] = ln['Fecha']
-        baf['Fecha'] = baf['Fecha']
-        baf['Fecha Inicio'] = baf['Fecha']
-        botmaker['Fecha Sesión'] = botmaker['Fecha']
-        bot_anuncios['Fecha'] = pd.NaT
-        landing['Fecha Ingreso'] = landing['Fecha']
-        meta_df['Día'] = meta_df['Fecha']
-        google_df['Día'] = google_df['Fecha']
     else:
         xls = pd.ExcelFile('DASHHHHH.xlsx')
         horas = pd.read_excel(xls, 'RAW_horas')
@@ -108,16 +107,16 @@ def load_raw_data_final():
         meta_df = pd.read_excel(xls, 'RAW_meta')
         google_df = pd.read_excel(xls, 'RAW_google')
         
-        horas['Fecha'] = pd.to_datetime(horas['Fecha'], dayfirst=True, errors='coerce')
-        porta['Fecha'] = pd.to_datetime(porta['Fecha inicio'], dayfirst=True, errors='coerce')
-        ln['Fecha'] = pd.to_datetime(ln['Fecha Inicio'], dayfirst=True, errors='coerce')
-        baf['Fecha'] = pd.to_datetime(baf['Fecha Inicio'], dayfirst=True, errors='coerce')
-        botmaker['Fecha Sesión'] = pd.to_datetime(botmaker['Fecha Sesión'], dayfirst=True, errors='coerce')
-        bot_anuncios['Fecha'] = pd.to_datetime(bot_anuncios['Fecha'], errors='coerce')
-        landing['Fecha Ingreso'] = pd.to_datetime(landing['Fecha Ingreso'], dayfirst=True, errors='coerce')
-        meta_df['Día'] = pd.to_datetime(meta_df['Día'], errors='coerce')
-        google_df['Día'] = pd.to_datetime(google_df['Día'], errors='coerce')
-        
+    horas['Fecha'] = clean_dates_series(horas['Fecha'])
+    porta['Fecha'] = clean_dates_series(porta['Fecha inicio'] if 'Fecha inicio' in porta.columns else porta['Fecha'])
+    ln['Fecha'] = clean_dates_series(ln['Fecha Inicio'] if 'Fecha Inicio' in ln.columns else ln['Fecha'])
+    baf['Fecha'] = clean_dates_series(baf['Fecha Inicio'] if 'Fecha Inicio' in baf.columns else baf['Fecha'])
+    botmaker['Fecha Sesión'] = clean_dates_series(botmaker['Fecha Sesión'] if 'Fecha Sesión' in botmaker.columns else botmaker['Fecha'])
+    bot_anuncios['Fecha'] = clean_dates_series(bot_anuncios['Fecha'])
+    landing['Fecha Ingreso'] = clean_dates_series(landing['Fecha Ingreso'] if 'Fecha Ingreso' in landing.columns else landing['Fecha'])
+    meta_df['Día'] = clean_dates_series(meta_df['Día'] if 'Día' in meta_df.columns else meta_df['Fecha'])
+    google_df['Día'] = clean_dates_series(google_df['Día'] if 'Día' in google_df.columns else google_df['Fecha'])
+
     return horas, porta, ln, baf, botmaker, bot_anuncios, landing, meta_df, google_df
 
 # ==========================================
@@ -184,8 +183,7 @@ def calculate_geex_metrics_final(anio, mes):
         is_non_working = is_weekend or is_holiday
         
         h_d = horas_m[horas_m['Fecha'].dt.date == d_date]
-        if h_d['Horas'].sum() == 0: continue
-            
+        
         p_d = p_dig[p_dig['Fecha'].dt.date == d_date]
         l_d = l_dig[l_dig['Fecha'].dt.date == d_date]
         b_d = b_dig[b_dig['Fecha'].dt.date == d_date]
@@ -300,7 +298,7 @@ def calculate_geex_metrics_final(anio, mes):
     m_ar = meta_raw.copy()
     m_ar['Pais_Clean'] = m_ar['Pais'].astype(str).str.strip().str.upper()
     m_ar = m_ar[m_ar['Pais_Clean'] == 'AR'].copy()
-    m_ar['Fecha_Clean'] = pd.to_datetime(m_ar['Día'], errors='coerce').dt.date
+    m_ar['Fecha_Clean'] = clean_dates_series(m_ar['Día']).dt.date
     m_ar['Prod_Clean'] = m_ar['Producto'].astype(str).str.strip().str.upper()
     m_ar = m_ar[m_ar['Prod_Clean'] != 'OTRO'].copy()
     
@@ -312,7 +310,7 @@ def calculate_geex_metrics_final(anio, mes):
     g_ar = google_raw.copy()
     g_ar['Pais_Clean'] = g_ar['Pais'].astype(str).str.strip().str.upper()
     g_ar = g_ar[g_ar['Pais_Clean'] == 'AR'].copy()
-    g_ar['Fecha_Clean'] = pd.to_datetime(g_ar['Día'], errors='coerce').dt.date
+    g_ar['Fecha_Clean'] = clean_dates_series(g_ar['Día']).dt.date
     g_ar['Prod_Clean'] = g_ar['Producto'].astype(str).str.strip().str.upper()
     g_ar = g_ar[g_ar['Prod_Clean'] != 'OTRO'].copy()
     
@@ -340,7 +338,6 @@ def calculate_geex_metrics_final(anio, mes):
     b_all['Plataforma'] = b_all['Plataforma'].astype(str).str.strip().str.upper()
     b_all['Producto_Ad'] = b_all['Producto'].astype(str).str.strip().str.upper()
 
-    # Obtener fechas del mes de las exportaciones publicitarias
     all_dates_meta = m_ar[pd.to_datetime(m_ar['Fecha_Clean']).dt.month == mes]['Fecha_Clean'].unique()
     all_dates_goog = g_ar[pd.to_datetime(g_ar['Fecha_Clean']).dt.month == mes]['Fecha_Clean'].unique()
     all_valid_dates = sorted(list(set(list(all_dates_meta) + list(all_dates_goog))))
@@ -384,8 +381,8 @@ def calculate_geex_metrics_final(anio, mes):
         p_porta = p_m_porta + p_g_porta
         tot_leads_plataforma = leads_plat_meta + leads_plat_goog
 
-        b_day = b_all[pd.to_datetime(b_all['Fecha Sesión'], dayfirst=True, errors='coerce').dt.date == d_val]
-        l_day = l_all[pd.to_datetime(l_all['Fecha Ingreso'], dayfirst=True, errors='coerce').dt.date == d_val]
+        b_day = b_all[clean_dates_series(b_all['Fecha Sesión']).dt.date == d_val]
+        l_day = l_all[clean_dates_series(l_all['Fecha Ingreso']).dt.date == d_val]
 
         bot_no_id = (b_day['Plataforma'] == 'NO SE IDENTIFICA').sum()
         bot_no_id_prod = (b_day['Producto_Ad'] == 'NO SE IDENTIFICA').sum()

@@ -1,67 +1,79 @@
-import hashlib
 import os
-import sys
 import pandas as pd
+import numpy as np
 
-ARCHIVO = sys.argv[1] if len(sys.argv) > 1 else "DASHHHHH.xlsx"
-CARPETA = "datos"
-SUPERVISORES_DIGITAL = ["RULFO, YAMIL", "PUENTES, SOLEDAD"]
-SAL = os.environ.get("SAL_TELEFONOS", "geex")
+def universal_date_parser(series):
+    """
+    Parseador universal de fechas: maneja texto DD/MM/YYYY, YYYY-MM-DD, 
+    marcas de tiempo con zona horaria UTC y valores nativos de Excel.
+    """
+    if series is None or len(series) == 0:
+        return pd.Series(dtype='datetime64[ns]')
+    
+    # Intenta convertir con formato mixto favoreciendo día primero (DD/MM/YYYY)
+    try:
+        parsed = pd.to_datetime(series, format='mixed', dayfirst=True, errors='coerce')
+    except Exception:
+        parsed = pd.to_datetime(series, dayfirst=True, errors='coerce')
+        
+    # Eliminar zonas horarias (si vienen de Botmaker u otras plataformas)
+    if hasattr(parsed.dt, 'tz') and parsed.dt.tz is not None:
+        parsed = parsed.dt.tz_localize(None)
+        
+    return parsed
 
-TABLAS = {
-    "horas":    ("RAW_horas", ["Fecha", "Usuario", "Horas", "Asesor", "Supervisor"], "Fecha", False),
-    "porta":    ("RAW_portaAR", ["Fecha inicio", "Supervisor", "Asesor", "Estado actual", "BOTMAKER", "LANDING", "PLANES", "ESIM"], "Fecha inicio", True),
-    "ln":       ("RAW_vozAR", ["Fecha Inicio", "Supervisor", "Asesor", "Estado Actual", "BOTMAKER", "LANDING"], "Fecha Inicio", True),
-    "baf":      ("RAW_baf", ["Fecha Inicio", "Supervisor", "Asesor", "Estado Actual", "BOTMAKER", "LANDING", "PLANES"], "Fecha Inicio", True),
-    "botmaker": ("RAW_botmaker", ["PAIS", "Fecha Sesión", "Hora Sesión", "Id Contacto/Número"], "Fecha Sesión", False),
-    "bot_an":   ("RAW_botmaker_anuncios", ["NIM", "Anuncio_Titulo", "Producto", "Plataforma"], None, False),
-    "landing":  ("RAW_landing", ["Pais", "Fecha Ingreso", "Fuente", "Plataforma", "Producto"], "Fecha Ingreso", False),
-    "meta":     ("RAW_meta", ["Pais", "Día", "Producto", "Monto gastado (ARS)"], "Día", False),
-    "google":   ("RAW_google", ["Pais", "Día", "Producto", "Costo num"], "Día", False),
-}
+def process_all_excel_sheets():
+    carpeta_out = "datos"
+    os.makedirs(carpeta_out, exist_ok=True)
+    
+    archivo_excel = 'DASHHHHH.xlsx'
+    if not os.path.exists(archivo_excel):
+        print(f"Error: No se encontró el archivo {archivo_excel}")
+        return
+        
+    print("Cargando y unificando pestañas de Excel...")
+    xls = pd.ExcelFile(archivo_excel)
+    
+    sheets_mapping = {
+        'RAW_horas': ('horas.parquet', ['Fecha']),
+        'RAW_portaAR': ('porta.parquet', ['Fecha', 'Fecha inicio', 'Fecha estado actual', 'Fecha portabilidad']),
+        'RAW_vozAR': ('ln.parquet', ['Fecha', 'Fecha Inicio', 'Fecha estado actual', 'Fecha de Activacion']),
+        'RAW_baf': ('baf.parquet', ['Fecha', 'Fecha Inicio', 'Fecha estado actual', 'Fecha de Instalación']),
+        'RAW_botmaker': ('botmaker.parquet', ['Fecha', 'Fecha Sesión']),
+        'RAW_botmaker_anuncios': ('bot_an.parquet', ['Fecha', 'Día']),
+        'RAW_landing': ('landing.parquet', ['Fecha', 'Fecha Ingreso', 'Fecha Primer Contacto', 'Fecha Ult Modific']),
+        'RAW_meta': ('meta.parquet', ['Fecha', 'Día']),
+        'RAW_google': ('google.parquet', ['Fecha', 'Día'])
+    }
+    
+    for sheet_name, (parquet_file, date_cols) in sheets_mapping.items():
+        if sheet_name in xls.sheet_names:
+            df = pd.read_excel(xls, sheet_name)
+            
+            # Asegurar columna 'Fecha' estandarizada en todos los dataframes
+            if 'Fecha' not in df.columns:
+                for candidate in ['Fecha inicio', 'Fecha Inicio', 'Fecha Sesión', 'Fecha Ingreso', 'Día']:
+                    if candidate in df.columns:
+                        df['Fecha'] = df[candidate]
+                        break
+            
+            # Limpiar y normalizar todas las columnas de fechas detectadas
+            for col in date_cols:
+                if col in df.columns:
+                    df[col] = universal_date_parser(df[col])
+            
+            # Guardar en la carpeta datos
+            out_path = os.path.join(carpeta_out, parquet_file)
+            try:
+                df.to_parquet(out_path, index=False)
+                print(f"  ✓ {sheet_name:<22} -> {parquet_file} ({len(df)} filas procesadas)")
+            except Exception as e:
+                # Respaldo si no esta instalado pyarrow/fastparquet
+                csv_path = out_path.replace('.parquet', '.csv')
+                df.to_csv(csv_path, index=False)
+                print(f"  ✓ {sheet_name:<22} -> {os.path.basename(csv_path)} ({len(df)} filas procesadas)")
 
-def parse_fecha(serie):
-    """Fechas ISO (AAAA-MM-DD, como las de Meta) se leen tal cual; el resto como DD/MM/AAAA.
-    Con dayfirst=True las ISO se daban vuelta (2026-10-11 pasaba a 10/11)."""
-    if pd.api.types.is_datetime64_any_dtype(serie):
-        return serie
-    t = serie.astype("string").str.strip()
-    es_iso = t.str.match(r"^\d{4}-\d{2}-\d{2}").fillna(False).astype(bool)
-    out = pd.Series(pd.NaT, index=serie.index, dtype="datetime64[ns]")
-    out[es_iso] = pd.to_datetime(t[es_iso].str[:10], format="%Y-%m-%d", errors="coerce")
-    out[~es_iso] = pd.to_datetime(t[~es_iso], dayfirst=True, errors="coerce")
-    return out
+    print("¡Procesamiento completo de datos finalizado con éxito!")
 
-def codigo_telefono(serie):
-    num = serie.astype(str).str.replace(r"\.0$", "", regex=True).str.replace(r"\D", "", regex=True).str[-10:]
-    return num.map(lambda n: hashlib.sha256((SAL + n).encode()).hexdigest()[:16] if n else "")
-
-def main():
-    os.makedirs(CARPETA, exist_ok=True)
-    xls = pd.ExcelFile(ARCHIVO)
-    total = 0
-    for nombre, (hoja, columnas, col_fecha, solo_digital) in TABLAS.items():
-        df = pd.read_excel(xls, hoja)
-        df = df[columnas].copy()
-        if solo_digital:
-            df = df[df["Supervisor"].isin(SUPERVISORES_DIGITAL)]
-        if col_fecha:
-            df["Fecha"] = parse_fecha(df[col_fecha])
-            if col_fecha != "Fecha":
-                df = df.drop(columns=[col_fecha])
-        for c in ("Id Contacto/Número", "NIM"):
-            if c in df.columns:
-                df[c] = codigo_telefono(df[c])
-        if nombre == "horas":
-            df = df.dropna(subset=["Fecha", "Usuario"])
-            df["Horas"] = pd.to_numeric(df["Horas"], errors="coerce").fillna(0)
-            df = df.sort_values("Horas", ascending=False).drop_duplicates(["Fecha", "Usuario"]).sort_values("Fecha")
-        for c in df.columns:
-            if df[c].dtype == object:
-                df[c] = df[c].astype("string")
-        ruta = os.path.join(CARPETA, f"{nombre}.parquet")
-        df.to_parquet(ruta, index=False)
-    print("¡Proceso terminado con éxito!")
-
-if __name__ == "__main__":
-    main()
+if __name__ == '__main__':
+    process_all_excel_sheets()
