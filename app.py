@@ -69,12 +69,23 @@ def safe_numeric_spend(series):
     return series.apply(parse_val)
 
 def clean_dates_series(series):
+    """Fechas ISO (AAAA-MM-DD, como las de Meta) se leen tal cual; el resto como DD/MM/AAAA.
+    Con dayfirst=True las ISO se daban vuelta (2026-10-11 pasaba a 10/11)."""
     if series is None or len(series) == 0:
         return pd.Series(dtype='datetime64[ns]')
-    try:
-        parsed = pd.to_datetime(series, format='mixed', dayfirst=True, errors='coerce')
-    except Exception:
-        parsed = pd.to_datetime(series, dayfirst=True, errors='coerce')
+    if pd.api.types.is_datetime64_any_dtype(series):
+        parsed = series
+    else:
+        t = series.astype('string').str.strip()
+        es_iso = t.str.match(r'^\d{4}-\d{2}-\d{2}').fillna(False).astype(bool)
+        parsed = pd.Series(pd.NaT, index=series.index, dtype='datetime64[ns]')
+        parsed[es_iso] = pd.to_datetime(t[es_iso].str[:10], format='%Y-%m-%d', errors='coerce')
+        resto = t[~es_iso]
+        if len(resto):
+            try:
+                parsed[~es_iso] = pd.to_datetime(resto, format='mixed', dayfirst=True, errors='coerce')
+            except Exception:
+                parsed[~es_iso] = pd.to_datetime(resto, dayfirst=True, errors='coerce')
     if hasattr(parsed.dt, 'tz') and parsed.dt.tz is not None:
         parsed = parsed.dt.tz_localize(None)
     return parsed
@@ -112,7 +123,8 @@ def load_raw_data_final():
     ln['Fecha'] = clean_dates_series(ln['Fecha Inicio'] if 'Fecha Inicio' in ln.columns else ln['Fecha'])
     baf['Fecha'] = clean_dates_series(baf['Fecha Inicio'] if 'Fecha Inicio' in baf.columns else baf['Fecha'])
     botmaker['Fecha Sesión'] = clean_dates_series(botmaker['Fecha Sesión'] if 'Fecha Sesión' in botmaker.columns else botmaker['Fecha'])
-    bot_anuncios['Fecha'] = clean_dates_series(bot_anuncios['Fecha'])
+    if 'Fecha' in bot_anuncios.columns:
+        bot_anuncios['Fecha'] = clean_dates_series(bot_anuncios['Fecha'])
     landing['Fecha Ingreso'] = clean_dates_series(landing['Fecha Ingreso'] if 'Fecha Ingreso' in landing.columns else landing['Fecha'])
     meta_df['Día'] = clean_dates_series(meta_df['Día'] if 'Día' in meta_df.columns else meta_df['Fecha'])
     google_df['Día'] = clean_dates_series(google_df['Día'] if 'Día' in google_df.columns else google_df['Fecha'])

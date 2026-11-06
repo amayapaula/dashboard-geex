@@ -4,22 +4,28 @@ import numpy as np
 
 def universal_date_parser(series):
     """
-    Parseador universal de fechas: maneja texto DD/MM/YYYY, YYYY-MM-DD, 
-    marcas de tiempo con zona horaria UTC y valores nativos de Excel.
+    Parseador universal de fechas. Las fechas ISO (AAAA-MM-DD, como las de Meta) se leen tal cual;
+    el resto (texto DD/MM/AAAA, marcas con zona horaria, valores nativos de Excel) con día primero.
+    Con dayfirst=True las ISO se daban vuelta (2026-10-11 pasaba a 10/11).
     """
     if series is None or len(series) == 0:
         return pd.Series(dtype='datetime64[ns]')
-    
-    # Intenta convertir con formato mixto favoreciendo día primero (DD/MM/YYYY)
-    try:
-        parsed = pd.to_datetime(series, format='mixed', dayfirst=True, errors='coerce')
-    except Exception:
-        parsed = pd.to_datetime(series, dayfirst=True, errors='coerce')
-        
+    if pd.api.types.is_datetime64_any_dtype(series):
+        parsed = series
+    else:
+        t = series.astype('string').str.strip()
+        es_iso = t.str.match(r'^\d{4}-\d{2}-\d{2}').fillna(False).astype(bool)
+        parsed = pd.Series(pd.NaT, index=series.index, dtype='datetime64[ns]')
+        parsed[es_iso] = pd.to_datetime(t[es_iso].str[:10], format='%Y-%m-%d', errors='coerce')
+        resto = t[~es_iso]
+        if len(resto):
+            try:
+                parsed[~es_iso] = pd.to_datetime(resto, format='mixed', dayfirst=True, errors='coerce')
+            except Exception:
+                parsed[~es_iso] = pd.to_datetime(resto, dayfirst=True, errors='coerce')
     # Eliminar zonas horarias (si vienen de Botmaker u otras plataformas)
     if hasattr(parsed.dt, 'tz') and parsed.dt.tz is not None:
         parsed = parsed.dt.tz_localize(None)
-        
     return parsed
 
 def process_all_excel_sheets():
